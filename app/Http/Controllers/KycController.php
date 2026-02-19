@@ -15,20 +15,20 @@ class KycController extends Controller
      */
     public function customerKycUpdation(Request $request): JsonResponse
     {
-        try {
+        // try {
             $validated = $request->validate([
                 'mobile_no' => 'required|string|max:50',
                 'id_proof_type' => 'required|integer|in:1,2,3,7', // 1=Pan, 2=Aadhar, 3=Voter, 7=Driving Licence
                 'id_proof_front_side' => 'required|string|max:500',
-                'id_proof_back_side' => 'nullable|string|max:500',
+                'id_proof_back_side' => 'nullable',
                 'id_proof_number' => 'required|string|max:50',
             ]);
-        } catch (ValidationException $e) {
-            return response()->json([
-                'message' => 'KYC Details Not Updated!!',
-                'status' => 400,
-            ], 400);
-        }
+        // } catch (ValidationException $e) {
+        //     return response()->json([
+        //         'message' => 'KYC Details Not Updated!!',
+        //         'status' => 400,
+        //     ], 400);
+        // }
 
         $updated = $this->updateCustomerKyc($validated);
 
@@ -59,7 +59,7 @@ class KycController extends Controller
                 'account_holder_name' => 'required|string|max:255',
                 'account_holder_name_bank' => 'required|string|max:255',
                 'ifsc_code' => 'required|string|max:50',
-                'file' => 'required|string|max:500',
+                'file' => 'required|string',
                 'name_match_percentage' => 'required|max:100',
             ]);
         } catch (ValidationException $e) {
