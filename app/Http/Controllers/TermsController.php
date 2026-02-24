@@ -62,7 +62,7 @@ class TermsController extends Controller
         return <<<'HTML'
             <b>Terms & Conditions</b>
             Kalyan Jeweller's Payment Portal Equals Integration Document
-            ~~1. You have enrolled in the Kalyan Akshaya Scheme. You may opt for any amount as per your convenience for enrolling into the Kalyan Akshaya Scheme, subject to a minimum amount of Rs 1000/-.
+            ~1. You have enrolled in the Kalyan Akshaya Scheme. You may opt for any amount as per your convenience for enrolling into the Kalyan Akshaya Scheme, subject to a minimum amount of Rs 1000/-.
             ~2. For the 1st instalment, you only need to pay 40% of the amount opted for by you. The subsequent instalments (2nd instalment to the 11th instalment) should be for the full amount.
             ~3. You are eligible to purchase jewellery for the amount remitted by you at the end of 11 months. Gold coins cannot be purchased under this scheme.
             ~4. The monthly installment cannot be carried over or paid in advance.

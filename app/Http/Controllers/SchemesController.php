@@ -186,7 +186,15 @@ class SchemesController extends Controller
             ],
             [
                 'id' => 2,
-                'scheme_name' => 'scheme name2',
+                'scheme_name' => 'Scheme Name2',
+                'no_of_installment' => 10,
+                'min_installment_amount' => null,
+                'max_instamment_amount' => null,
+                'weight_allocation' => true,
+            ],
+            [
+                'id' => 3,
+                'scheme_name' => 'Scheme Name3',
                 'no_of_installment' => 10,
                 'min_installment_amount' => null,
                 'max_instamment_amount' => null,
