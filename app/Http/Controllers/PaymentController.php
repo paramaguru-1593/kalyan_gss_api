@@ -107,7 +107,7 @@ class PaymentController extends Controller
 
         // TODO: Check max payment limit for current month (DB/external). Return null if invalid account.
         return [
-            'paymentAccepted' => true,
+            'paymentAccepted' => false,
             'paymentAcceptedMonth' => 'February-2025',
             'acceptanceReason' => 'success',
         ];

@@ -91,7 +91,7 @@ class CustomerKycController extends Controller
             'bank_details' => [
                 'bank_account_no' => '********001',
                 'account_holder_name' => 'TEST S ',
-                'account_holder_name_bank' => '',
+                'account_holder_name_bank' => 'SBI',
                 'ifsc_code' => 'ICB0025',
                 'name_match_percentage' => '95.00',
             ],
