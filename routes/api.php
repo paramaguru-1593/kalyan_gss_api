@@ -19,6 +19,8 @@ Route::group(['middleware' => 'auth:customer-api'], function () {
     Route::post('/customerkycupdation', [CustomerController::class, 'customerKycUpdation']);
     Route::post('/customerbankdetail_updation', [CustomerController::class, 'customerBankDetailUpdation']);
 
+    Route::post('/profile-completeness', [CustomerController::class, 'profileCompleteness']);
+
     // External APIs (no authentication required)
     Route::get('/externals/getSchemesByMobileNumber', [SchemesController::class, 'getSchemesByMobileNumber']);
 

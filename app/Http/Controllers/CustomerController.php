@@ -170,6 +170,33 @@ class CustomerController extends Controller
     }
 
     /**
+     * Customer profile completeness score.
+     * POST body: { "mobile_number": "9361901823" }
+     * Response: score out of 100, filled/total, missing_fields.
+     */
+    public function profileCompleteness(Request $request): JsonResponse
+    {
+        $request->validate([
+            'mobile_number' => 'required|string|max:50',
+        ], [
+            'mobile_number.required' => 'mobile_number is required',
+        ]);
+
+        $customer = Customer::where('mobile_no', $request->input('mobile_number'))->first();
+
+        if (! $customer) {
+            return response()->json([
+                'message' => 'Customer not found',
+                'status' => 400,
+            ], 400);
+        }
+
+        return response()->json([
+            'profile_completeness' => $this->getProfileCompleteness($customer),
+        ]);
+    }
+
+    /**
      * Customer KYC info – get customer details, address, KYC and bank info by mobile_no.
      * Request: { "mobile_no": "9361901823" }
      * Response: customer_details with address, kyc_details, bank_details (masked where needed).
@@ -201,6 +228,13 @@ class CustomerController extends Controller
                 'gender' => $customer->gender ? strtolower($customer->gender) : '',
                 'date_of_birth' => $customer->date_of_birth?->format('Y-m-d') ?? '',
                 'customer_code' => $customer->customer_code ?? '',
+                'nominee_details' => [
+                    'nominee_name' => $customer->nominee_name ?? '',
+                    'relation_of_nominee' => $customer->relation_of_nominee ?? '',
+                    'nominee_dob' => $customer->nominee_dob?->format('Y-m-d') ?? '',
+                    'nominee_mobile_number' => $customer->nominee_mobile_number ?? '',
+                    'nominee_address' => $customer->nominee_address ?? '',
+                ],
                 'address' => [
                     'current_address' => [
                         'current_house_no' => $customer->current_house_no ?? '',
@@ -234,6 +268,7 @@ class CustomerController extends Controller
                         : '',
                 ],
             ],
+            'profile_completeness' => $this->getProfileCompleteness($customer),
         ]);
     }
 
@@ -255,5 +290,64 @@ class CustomerController extends Controller
             return 0;
         }
         return (int) preg_replace('/\D/', '', $value) ?: 0;
+    }
+
+    /**
+     * Profile completeness: fields that users can fill (from personal, KYC, bank flows).
+     * Returns: filled count, total count, score out of 100, and list of missing field keys.
+     */
+    public function getProfileCompleteness(Customer $customer): array
+    {
+        $fields = [
+            // Personal (updatePersonalDetails)
+            'first_name' => $customer->first_name,
+            'last_name' => $customer->last_name,
+            'email' => $customer->email,
+            'date_of_birth' => $customer->date_of_birth,
+            'gender' => $customer->gender,
+            'current_street' => $customer->current_street,
+            'current_city' => $customer->current_city,
+            'current_state' => $customer->current_state,
+            'current_pincode' => $customer->current_pincode,
+            'nominee_name' => $customer->nominee_name,
+            'relation_of_nominee' => $customer->relation_of_nominee,
+            'nominee_dob' => $customer->nominee_dob,
+            'nominee_address' => $customer->nominee_address,
+            'nominee_mobile_number' => $customer->nominee_mobile_number,
+            // KYC (customerKycUpdation)
+            'id_proof_type' => $customer->id_proof_type !== null ? (string) $customer->id_proof_type : null,
+            'id_proof_number' => $customer->id_proof_number,
+            'id_proof_front_side_url' => $customer->id_proof_front_side_url,
+            'id_proof_back_side_url' => $customer->id_proof_back_side_url,
+            // Bank (customerBankDetailUpdation)
+            'bank_account_no' => $customer->bank_account_no,
+            'account_holder_name' => $customer->account_holder_name,
+            'account_holder_name_bank' => $customer->account_holder_name_bank,
+            'ifsc_code' => $customer->ifsc_code,
+            'bank_book_url' => $customer->bank_book_url,
+            'name_match_percentage' => $customer->name_match_percentage !== null ? (string) $customer->name_match_percentage : null,
+        ];
+
+        $filled = 0;
+        $missing = [];
+        foreach ($fields as $key => $value) {
+            $isEmpty = $value === null || $value === '';
+            if (! $isEmpty) {
+                $filled++;
+            } else {
+                $missing[] = $key;
+            }
+        }
+
+        $total = count($fields);
+        $scoreOutOf100 = $total > 0 ? (int) round(($filled / $total) * 100) : 0;
+
+        return [
+            'score' => $scoreOutOf100,
+            'out_of' => 100,
+            'filled' => $filled,
+            'total' => $total,
+            'missing_fields' => $missing,
+        ];
     }
 }
