@@ -2,6 +2,8 @@
 
 namespace App\Providers;
 
+use App\Services\ThirdPartyApiService;
+use App\Services\ThirdPartyAuthService;
 use Illuminate\Support\ServiceProvider;
 use Laravel\Passport\Passport;
 
@@ -12,7 +14,17 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        $this->app->singleton(ThirdPartyAuthService::class, function ($app) {
+            return new ThirdPartyAuthService(
+                config('thirdparty.mykalyan.token_name', 'mykalyan')
+            );
+        });
+
+        $this->app->singleton(ThirdPartyApiService::class, function ($app) {
+            return new ThirdPartyApiService(
+                $app->make(ThirdPartyAuthService::class)
+            );
+        });
     }
 
     /**
