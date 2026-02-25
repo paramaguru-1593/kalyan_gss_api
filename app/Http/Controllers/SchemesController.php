@@ -2,15 +2,28 @@
 
 namespace App\Http\Controllers;
 
+use App\Exceptions\ThirdPartyApiException;
+use App\Services\ThirdPartyApiService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 
 class SchemesController extends Controller
 {
+    /** Third-party path: GET with access_token in query (MyKalyan externals). */
+    private const THIRDPARTY_GET_SCHEMES_PATH = 'thirdparty/api/externals/getSchemesByMobileNumber';
+    private const THIRDPARTY_GET_CUSTOMER_LEDGER_PATH = 'thirdparty/api/externals/getCustomerLedgerReport';
+    private const THIRDPARTY_GET_ACCOUNT_INFO_PATH = 'thirdparty/api/Enrollment_tbs/getAccountInformation';
+    private const THIRDPARTY_STOREBASED_SCHEME_PATH = 'thirdparty/api/storebasedscheme_data';
+
+    public function __construct(
+        private readonly ThirdPartyApiService $thirdPartyApi
+    ) {
+    }
+
     /**
      * Get scheme information by mobile number.
-     * GET /api/externals/getSchemesByMobileNumber
-     * Query: MobileNumber (required). Header: access_token (optional, no validation).
+     * GET /api/externals/getSchemesByMobileNumber?MobileNumber=...
+     * Proxies to third-party: .../thirdparty/api/externals/getSchemesByMobileNumber?access_token=...&MobileNumber=...
      */
     public function getSchemesByMobileNumber(Request $request): JsonResponse
     {
@@ -22,38 +35,31 @@ class SchemesController extends Controller
 
         $mobileNumber = $request->query('MobileNumber');
 
-        // TODO: Replace with actual lookup (DB/external service). For now returns stub.
-        $data = $this->findSchemesByMobileNumber($mobileNumber);
-
-        if ($data === null) {
-            return response()->json([
-                'data' => (object) [],
-                'error' => [
-                    'status' => 10000,
-                    'message' => 'No Data Found',
-                    'description' => 'Failed',
-                ],
+        try {
+            $response = $this->thirdPartyApi->getWithAccessTokenInQuery(self::THIRDPARTY_GET_SCHEMES_PATH, [
+                'MobileNumber' => $mobileNumber,
             ]);
+        } catch (ThirdPartyApiException $e) {
+            $status = $e->getHttpStatus() ?: 502;
+            $body = $e->getResponseBody();
+            $error = $body['error'] ?? [
+                'status' => $status,
+                'message' => $e->getMessage(),
+                'description' => '',
+            ];
+            return response()->json([
+                'data' => $body['data'] ?? (object) [],
+                'error' => $error,
+            ], $status >= 400 ? $status : 200);
         }
 
-        return response()->json([
-            'data' => [
-                'Response' => [
-                    'data' => $data,
-                ],
-            ],
-            'error' => [
-                'status' => 200,
-                'message' => 'success',
-                'description' => '',
-            ],
-        ]);
+        return response()->json($response);
     }
 
     /**
      * Get scheme information by account number (EnrollmentID).
-     * GET /api/Enrollment_tbs/getAccountInformation
-     * Query: EnrollmentID (required). Header: access_token (optional, no validation).
+     * GET /api/Enrollment_tbs/getAccountInformation?EnrollmentID=...
+     * Proxies to third-party: .../thirdparty/api/Enrollment_tbs/getAccountInformation?access_token=...&EnrollmentID=...
      */
     public function getAccountInformation(Request $request): JsonResponse
     {
@@ -64,37 +70,37 @@ class SchemesController extends Controller
         ]);
 
         $enrollmentId = $request->query('EnrollmentID');
-        $accountData = $this->findAccountByEnrollmentId($enrollmentId);
 
-        if ($accountData === null) {
-            return response()->json([
-                'data' => [(object) []],
-                'error' => [
-                    'status' => 4002,
-                    'message' => "Account doesn't exist",
-                    'description' => "Account doesn't exist",
-                ],
+        try {
+            $response = $this->thirdPartyApi->getWithAccessTokenInQuery(self::THIRDPARTY_GET_ACCOUNT_INFO_PATH, [
+                'EnrollmentID' => $enrollmentId,
             ]);
+        } catch (ThirdPartyApiException $e) {
+            $status = $e->getHttpStatus() ?: 502;
+            $body = $e->getResponseBody();
+            $error = $body['error'] ?? [
+                'status' => $status,
+                'message' => $e->getMessage(),
+                'description' => '',
+            ];
+            return response()->json([
+                'data' => $body['data'] ?? [],
+                'error' => $error,
+            ], $status >= 400 ? $status : 200);
         }
 
-        return response()->json([
-            'data' => [$accountData],
-            'error' => [
-                'status' => 200,
-                'message' => 'success',
-                'description' => '',
-            ],
-        ]);
+        return response()->json($response);
     }
 
     /**
-     * Get Scheme List – available schemes with installments and min/max EMI. Default store_id is 3.
+     * Get Scheme List – available schemes for enrolment (installments, min/max EMI). Default store_id is 3.
      * POST /api/storebasedscheme_data
+     * Proxies to third-party with Bearer token in header; request body: store_id.
      */
     public function storeBasedSchemeData(Request $request): JsonResponse
     {
         $storeId = $request->input('store_id', 3);
-        if (!is_numeric($storeId) || (int) $storeId <= 0) {
+        if (! is_numeric($storeId) || (int) $storeId <= 0) {
             return response()->json([
                 'error' => [
                     'status' => 400,
@@ -104,26 +110,30 @@ class SchemesController extends Controller
         }
 
         $storeId = (int) $storeId;
-        $schemes = $this->findStoreBasedSchemes($storeId);
 
-        if ($schemes === null) {
+        try {
+            $response = $this->thirdPartyApi->post(self::THIRDPARTY_STOREBASED_SCHEME_PATH, [
+                'store_id' => $storeId,
+            ]);
+        } catch (ThirdPartyApiException $e) {
+            $status = $e->getHttpStatus() ?: 502;
+            $body = $e->getResponseBody();
+            $error = $body['error'] ?? [
+                'status' => $status,
+                'message' => $e->getMessage(),
+            ];
             return response()->json([
-                'error' => [
-                    'status' => 400,
-                    'message' => 'Invalid Store ID !!',
-                ],
-            ], 400);
+                'error' => $error,
+            ], $status >= 400 ? $status : 200);
         }
 
-        return response()->json([
-            'data' => $schemes,
-        ]);
+        return response()->json($response);
     }
 
     /**
      * Get Customer Ledger – transaction history and financial info by enrollment number.
-     * GET /api/externals/getCustomerLedgerReport
-     * Query: EnrollmentNo (required). Header: access_token (optional, no validation).
+     * GET /api/externals/getCustomerLedgerReport?EnrollmentNo=...
+     * Proxies to third-party: .../thirdparty/api/externals/getCustomerLedgerReport?access_token=...&EnrollmentNo=...
      */
     public function getCustomerLedgerReport(Request $request): JsonResponse
     {
@@ -134,382 +144,25 @@ class SchemesController extends Controller
         ]);
 
         $enrollmentNo = $request->query('EnrollmentNo');
-        $result = $this->findCustomerLedger($enrollmentNo);
 
-        if ($result === null) {
-            return response()->json([
-                'data' => [
-                    'Response' => [
-                        'data' => [],
-                        'error' => [
-                            [
-                                'statusCode' => 500,
-                                'statusMessage' => 'Invalid Enrollment Number',
-                            ],
-                        ],
-                    ],
-                ],
-                'error' => [
-                    'status' => 200,
-                    'message' => 'success',
-                    'description' => '',
-                ],
-            ]);
-        }
-
-        return response()->json([
-            'data' => [
-                'Response' => $result,
-            ],
-            'error' => [
-                'status' => 200,
-                'message' => 'success',
-                'description' => '',
-            ],
-        ]);
-    }
-
-    /**
-     * Find schemes by store_id. Return null for invalid store.
-     */
-    private function findStoreBasedSchemes(int $storeId): ?array
-    {
-        // TODO: Replace with DB or external service lookup.
-        return [
-            [
-                'id' => 1,
-                'scheme_name' => 'Scheme Name1',
-                'no_of_installment' => 12,
-                'min_installment_amount' => 2000,
-                'max_instamment_amount' => 5000,
-                'weight_allocation' => true,
-            ],
-            [
-                'id' => 2,
-                'scheme_name' => 'Scheme Name2',
-                'no_of_installment' => 10,
-                'min_installment_amount' => null,
-                'max_instamment_amount' => null,
-                'weight_allocation' => true,
-            ],
-            [
-                'id' => 3,
-                'scheme_name' => 'Scheme Name3',
-                'no_of_installment' => 10,
-                'min_installment_amount' => null,
-                'max_instamment_amount' => null,
-                'weight_allocation' => true,
-            ],
-        ];
-    }
-
-    /**
-     * Find customer ledger by EnrollmentNo. Return null for invalid enrollment.
-     */
-    private function findCustomerLedger(string $enrollmentNo): ?array
-    {
-        $enrollmentNo = trim($enrollmentNo);
-        if ($enrollmentNo === '') {
-            return null;
-        }
-
-        // TODO: Replace with DB or external service lookup.
-        return [
-            'totalamount' => 2000,
-            'personalDetails' => [
-                'FirstName' => 'User',
-                'LastName' => 'G',
-                'MobileNumber' => '9994795321',
-                'Address1' => 'NO. 172',
-                'Address2' => 'NORTH VILLAGE STREET',
-                'Pincode' => '',
-                'Address3' => '',
-                'State' => 'Kerala',
-                'MyKalyanName' => 'Kerala',
-                'Branch' => 'Kerala',
+        try {
+            $response = $this->thirdPartyApi->getWithAccessTokenInQuery(self::THIRDPARTY_GET_CUSTOMER_LEDGER_PATH, [
                 'EnrollmentNo' => $enrollmentNo,
-                'SchemeStatus' => 'Open',
-                'JoinDate' => '2024-12-12',
-                'MaturityDate' => '2025-09-12',
-                'SchemeType' => 'Akshaya Priority Scheme',
-                'NoOfInstallments' => 9,
-                'EMI' => 1000.0,
-                'UserFirstName' => 'Rengaraj',
-                'UserLastName' => 'G',
-                'Username' => '6053',
-                'MaterialType' => 'GOLD',
-                'ClosureDate' => null,
-                'FeeAmount' => 0.0,
-                'TotalAmount' => 9000.0,
-                'PaidAmount' => 2000,
-                'RemainingAmount' => 7000.0,
-                'IDProofName' => 'customer/proof/2024/12/12/testimage.jpeg',
-                'Beneficiary' => 'RENGARAJ G',
-                'InstoreUserID' => null,
-                'InstoreUserName' => null,
-                'NomineeFirstName' => 'G',
-                'NomineeLastName' => '',
-                'NomineeRelationship' => 'SON',
-                'NomineeMobileNumber' => '',
-                'NomineeAddress' => '',
-                'NomineeEmailAddress' => '',
-                'SchemeID' => 1001,
-                'IDProofNumber' => '123456778',
-                'IDProofType' => 'PASSPORT',
-                'SchemeEfficientType' => 'InEfficient',
-                'ReasonForInEfficient' => 'Not all the installments have been paid',
-                'CustomerID' => 58691733978856,
-                'DateOfBirth' => '',
-                'Gender' => 'male',
-                'emailAddress' => 'renarv88@gmail.com',
-                'SchemeName' => 'Akshaya Priority Scheme',
-                'SIONCC' => false,
-                'TransactionId' => '',
-                'Emandate' => false,
-                'DebitDate' => '',
-            ],
-            'Collections' => [
-                [
-                    'ReferenceNo' => 110000000017,
-                    'MOP' => 'CARD',
-                    'Remarks' => 'NA',
-                    'Date' => '2024-December-12',
-                    'Amount' => 1000,
-                    'IssuedDate' => null,
-                    'ChequeNumber' => null,
-                    'EMIMonth' => 'December 2024',
-                    'PaymentStatus' => 'Completed',
-                    'goldrate' => null,
-                    'goldweight' => null,
-                ],
-            ],
-        ];
-    }
-
-    /**
-     * Find account/scheme data by EnrollmentID. Return null when account doesn't exist.
-     */
-    private function findAccountByEnrollmentId(string $enrollmentId): ?array
-    {
-        $enrollmentId = trim($enrollmentId);
-        if ($enrollmentId === '') {
-            return null;
+            ]);
+        } catch (ThirdPartyApiException $e) {
+            $status = $e->getHttpStatus() ?: 502;
+            $body = $e->getResponseBody();
+            $error = $body['error'] ?? [
+                'status' => $status,
+                'message' => $e->getMessage(),
+                'description' => '',
+            ];
+            return response()->json([
+                'data' => $body['data'] ?? (object) [],
+                'error' => $error,
+            ], $status >= 400 ? $status : 200);
         }
 
-        // TODO: Replace with DB or external service lookup.
-        // Stub: return sample structure for any non-empty EnrollmentID.
-        return [
-            'CustomerID' => 58691733978856,
-            'FirstName' => 'User',
-            'LastName' => 'G',
-            'MobileNumber' => '9994795321',
-            'JoinDate' => '2024-12-12 00:09:28',
-            'EMIAmount' => 1000.0,
-            'TotalInstallmentAmount' => 9000.0,
-            'NoOfPaidInstallment' => 2,
-            'RemainingAmount' => 7000.0,
-            'EnrollmentID' => $enrollmentId,
-            'AmountPaid' => 2000.0,
-            'paymentAccepted' => true,
-            'paymentAcceptedMonth' => 'Next Month',
-            'Status' => 'Open',
-            'SchemeName' => 'Akshaya Priority Scheme',
-            'SchemeEfficientType' => 'InEfficient',
-            'SchemeID' => 1001,
-            'NoOfInstallments' => 9,
-            'ReasonForInEfficient' => 'Not all the installments have been paid',
-            'SIONCC' => false,
-            'DebitDate' => '',
-            'TransactionId' => '',
-            'Emandate' => false,
-            'IDProofStatus' => 'Not Verified',
-        ];
-    }
-
-    /**
-     * Find scheme/customer data by mobile number. Return null when no data found.
-     */
-    private function findSchemesByMobileNumber(string $mobileNumber): ?array
-    {
-        // TODO: Replace with DB or external service call.
-        // Stub: return sample structure for any non-empty mobile; otherwise no data.
-        $mobileNumber = trim($mobileNumber);
-        if ($mobileNumber === '') {
-            return null;
-        }
-
-        return [
-            'customerId' => 58691733978856,
-            'profile' => [
-                'personalDetails' => [
-                    'FirstName' => 'User',
-                    'LastName' => 'G',
-                    'MobileNumber' => $mobileNumber,
-                    'EmailAddress' => 'user88@gmail.com',
-                ],
-                'currentAddress' => [
-                    'street1' => 'NO. 172',
-                    'street2' => 'NORTH VILLAGE STREET',
-                    'postOffice' => '560003',
-                    'pinCode' => '',
-                    'city' => null,
-                    'state' => 'Kerala',
-                    'permanentAddress' => [
-                        'street1' => 'NO. 172',
-                        'street2' => 'NORTH VILLAGE STREET',
-                        'postOffice' => '',
-                        'pinCode' => '',
-                        'city' => '',
-                        'state' => 'Kerala',
-                    ],
-                ],
-                'enrollmentList' => [
-                    [
-                        'PlanType' => 'Akshaya Priority Scheme',
-                        'NomineeFirstName' => 'G',
-                        'NomineeLastName' => '',
-                        'NomineeRelationship' => 'SON',
-                        'NomineeMobileNumber' => '',
-                        'NomineeAddress' => 'NO. 172NORTH VILLAGE STREET',
-                        'NomineeEmailAddress' => '',
-                        'Status' => 'Open',
-                        'Active' => true,
-                        'CustomerID' => 58691733978856,
-                        'JoinDate' => '2024-12-12 00:09:28',
-                        'EndDate' => '2025-09-12',
-                        'NoMonths' => 9,
-                        'InitialMOP' => 'CARD',
-                        'EMIAmount' => 1000,
-                        'EnrollmentDayGoldRate' => 3100,
-                        'EnrollmentID' => 68721733978856,
-                        'SchemeID' => 1001,
-                        'FeeAmount' => 0,
-                        'IsMembershipFeeRequired' => 'Y',
-                        'FinalRedeemableAmount' => 9000,
-                        'SchemeEfficientType' => 'InEfficient',
-                        'ReasonForInEfficient' => 'Not all the installments have been paid',
-                        'SIONCC' => false,
-                        'Emandate' => false,
-                        'TransactionId' => '',
-                        'DebitDate' => '',
-                        'TotalPaidAmount' => 2000,
-                        'collections' => [
-                            [
-                                'Active' => 'Y',
-                                'Amount' => 1000,
-                                'BankName' => 'test',
-                                'BranchName' => null,
-                                'CollectionDate' => '2024-12-12T00:09:28.000001',
-                                'CollectionID' => 36,
-                                'EnrollmentID' => 68721733978856,
-                                'MOP' => 'CARD',
-                                'EMIAmount' => 1000,
-                            ],
-                        ],
-                    ],
-                    [
-                        "PlanType" => "Akshaya Priority 4",
-                        "NomineeFirstName" => "Gopi",
-                        "NomineeLastName" => null,
-                        "NomineeRelationship" => "Father",
-                        "NomineeMobileNumber" => null,
-                        "NomineeAddress" => null,
-                        "NomineeEmailAddress" => null,
-                        "Status" => "Open",
-                        "Active" => true,
-                        "CustomerID" => 58461589872111,
-                        "JoinDate" => "2020-06-20 12:08:41",
-                        "EndDate" => "2020-12-20",
-                        "NoMonths" => 6,
-                        "InitialMOP" => "ONLINE",
-                        "EMIAmount" => 1000,
-                        "EnrollmentDayGoldRate" => 3100,
-                        "EnrollmentID" => 62992882878134,
-                        "SchemeID" => 1025,
-                        "FeeAmount" => 300,
-                        "IsMembershipFeeRequired" => "Y",
-                        "FinalRedeemableAmount" => 6000,
-                        "SchemeEfficientType" => "InEfficient",
-                        "ReasonForInEfficient" => "Not all the installments have been paid",
-                        "SIONCC" => false,
-                        "Emandate" => false,
-                        "TransactionId" => "",
-                        "DebitDate" => "",
-                        "TotalPaidAmount" => 1,
-                        "collections" => [
-                            [
-                                "Active" => "Y",
-                                "Amount" => 1,
-                                "BankName" => null,
-                                "BranchName" => null,
-                                "CollectionDate" => "2021-01-19T17:44:03",
-                                "CollectionID" => 1790,
-                                "EnrollmentID" => 62992882878134,
-                                "MOP" => "ONLINE-MATRIMONY",
-                                "EMIAmount" => 1
-                            ]
-                        ]
-                    ],
-                    [
-                        "PlanType" => "DHAN SAMRIDDHI",
-                        "NomineeFirstName" => "Gopi",
-                        "NomineeLastName" => null,
-                        "NomineeRelationship" => "Father",
-                        "NomineeMobileNumber" => null,
-                        "NomineeAddress" => null,
-                        "NomineeEmailAddress" => null,
-                        "Status" => "Open",
-                        "Active" => true,
-                        "CustomerID" => 58461589872111,
-                        "JoinDate" => "2020-06-26 12:18:24",
-                        "EndDate" => "2020-12-26",
-                        "NoMonths" => 6,
-                        "InitialMOP" => "ONLINE",
-                        "EMIAmount" => 1000,
-                        "EnrollmentDayGoldRate" => 3100,
-                        "EnrollmentID" => 67089082072732,
-                        "SchemeID" => 1025,
-                        "FeeAmount" => 300,
-                        "IsMembershipFeeRequired" => "Y",
-                        "FinalRedeemableAmount" => 6000,
-                        "SchemeEfficientType" => "InEfficient",
-                        "ReasonForInEfficient" => "Not all the installments have been paid",
-                        "SIONCC" => false,
-                        "Emandate" => false,
-                        "TransactionId" => "hdfc9862198",
-                        "DebitDate" => "17",
-                        "TotalPaidAmount" => 1000,
-                        "collections" => [
-                            [
-                                "Active" => "Y",
-                                "Amount" => 1000,
-                                "BankName" => null,
-                                "BranchName" => null,
-                                "CollectionDate" => "2020-06-26T12:18:24.739830",
-                                "CollectionID" => 1353,
-                                "EnrollmentID" => 67089082072732,
-                                "MOP" => "ONLINE-MATRIMONY",
-                                "EMIAmount" => 1000
-                            ],
-                            [
-                                "Active" => "Y",
-                                "Amount" => 1000,
-                                "BankName" => null,
-                                "BranchName" => null,
-                                "CollectionDate" => "2020-10-17T00:09:28.000001",
-                                "CollectionID" => 1502,
-                                "EnrollmentID" => 67089082072732,
-                                "MOP" => "Emandate",
-                                "EMIAmount" => 1000
-                            ]
-                        ]
-                    ]
-                ],
-                'IDProofStatus' => 'Not Verified',
-                'IDProofType' => 'PASSPORT',
-                'IDProofURL' => 'customer/proof/2024/12/12/testimage.jpeg',
-                'IDProofNumber' => '123456778',
-            ],
-        ];
+        return response()->json($response);
     }
 }
