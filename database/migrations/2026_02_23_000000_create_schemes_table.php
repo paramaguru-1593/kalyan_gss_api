@@ -27,7 +27,7 @@ return new class extends Migration
 
             $table->timestamps();
 
-            $table->foreign('store_id')->references('id')->on('kj_stores')->cascadeOnDelete();
+            // $table->foreign('store_id')->references('id')->on('kj_stores')->cascadeOnDelete();
             $table->index('store_id');
             $table->index('scheme_name');
         });

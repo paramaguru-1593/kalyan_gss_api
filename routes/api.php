@@ -3,6 +3,7 @@
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\CustomerController;
+use App\Http\Controllers\DocumanController;
 use App\Http\Controllers\EnrollmentController;
 use App\Http\Controllers\GoldRateController;
 use App\Http\Controllers\KycController;
@@ -29,6 +30,9 @@ Route::group(['middleware' => 'auth:customer-api'], function () {
     Route::post('/enroll_new', [EnrollmentController::class, 'enrollNew']);
 
     Route::post('/customerkycinfo', [CustomerController::class, 'customerKycInfo']);
+
+    // Docman India: GetCustomerDetails (separate API)
+    Route::post('/customer/GetCustomerDetails', [DocumanController::class, 'getCustomerDetails']);
 
     // Enrollment / account information
     Route::get('/Enrollment_tbs/getAccountInformation', [SchemesController::class, 'getAccountInformation']);

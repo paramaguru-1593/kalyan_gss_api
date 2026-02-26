@@ -2,6 +2,8 @@
 
 namespace App\Providers;
 
+use App\Services\DocumanApiService;
+use App\Services\DocumanTokenService;
 use App\Services\ThirdPartyApiService;
 use App\Services\ThirdPartyAuthService;
 use Illuminate\Support\ServiceProvider;
@@ -24,6 +26,11 @@ class AppServiceProvider extends ServiceProvider
             return new ThirdPartyApiService(
                 $app->make(ThirdPartyAuthService::class)
             );
+        });
+
+        $this->app->singleton(DocumanTokenService::class);
+        $this->app->singleton(DocumanApiService::class, function ($app) {
+            return new DocumanApiService($app->make(DocumanTokenService::class));
         });
     }
 

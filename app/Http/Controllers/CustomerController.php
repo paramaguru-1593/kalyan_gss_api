@@ -197,7 +197,7 @@ class CustomerController extends Controller
     }
 
     /**
-     * Customer KYC info – get customer details, address, KYC and bank info by mobile_no.
+     * Customer KYC info – get customer details, address, KYC and bank info by mobile_no (from local DB).
      * Request: { "mobile_no": "9361901823" }
      * Response: customer_details with address, kyc_details, bank_details (masked where needed).
      */
