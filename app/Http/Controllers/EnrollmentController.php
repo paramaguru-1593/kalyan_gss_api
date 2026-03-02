@@ -2,8 +2,13 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Customer;
+use App\Models\Scheme;
+use App\Models\SchemeEnrollment;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 class EnrollmentController extends Controller
@@ -80,11 +85,58 @@ class EnrollmentController extends Controller
      */
     private function persistEnrollment(array $data): ?array
     {
-        // TODO: Replace with DB insert and real account_no/receipt_no generation.
-        // Stub: accept valid data and return sample IDs.
-        return [
-            'account_no' => 2008754210,
-            'receipt_no' => 20005,
-        ];
+        return DB::transaction(function () use ($data): ?array {
+            // Find existing customer by external customerId; do not create a new customer here.
+            $externalCustomerId = (int) $data['customer_id'];
+            $customer = Customer::where('customerId', $externalCustomerId)->first();
+
+            if (! $customer) {
+                // Customer must exist before creating an enrollment.
+                return null;
+            }
+
+            $tenure = (int) $data['tenure'];
+            $emiAmount = (float) $data['emi_amount'];
+
+            $joinDate = Carbon::now();
+            $maturityDate = $tenure > 0 ? $joinDate->copy()->addMonths($tenure) : null;
+            $pendingAmount = $tenure > 0 ? $emiAmount * $tenure : 0.0;
+
+            // Generate a unique enrollment_id for this enrollment (account number).
+            $enrollmentId = null;
+            do {
+                $candidate = (string) (90000000000000 + random_int(1, 9_999_999));
+            } while (SchemeEnrollment::where('enrollment_id', $candidate)->exists());
+            $enrollmentId = $candidate;
+
+            $schemeName = Scheme::where('id', $data['scheme_id'])
+                ->value('scheme_name'); // Optional: can be set based on scheme_id if needed
+
+            $enrollment = new SchemeEnrollment([
+                'customer_id' => $customer->id,
+                'scheme_id' => (int) $data['scheme_id'],
+                'scheme_name' => $schemeName,
+                'enrollment_id' => $enrollmentId,
+                'enrollment_date' => $joinDate->toDateString(),
+                'maturity_date' => $maturityDate ? $maturityDate->toDateString() : null,
+                'installment_amount' => $emiAmount,
+                'paid_amount' => 0.0,
+                'pending_amount' => $pendingAmount,
+                'status' => 'Open',
+            ]);
+
+            $enrollment->save();
+            $customer->refreshTotalEnrollments();
+
+            return [
+                'account_no' => $enrollmentId,
+                'receipt_no' => 20000 + $enrollment->id,
+            ];
+        });
+    }
+
+    private function normalizeMobile(string $value): string
+    {
+        return trim(preg_replace('/\s+/', '', $value));
     }
 }

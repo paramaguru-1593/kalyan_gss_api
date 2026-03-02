@@ -6,6 +6,7 @@ use App\Exceptions\ThirdPartyApiException;
 use App\Models\Customer;
 use App\Models\Scheme;
 use App\Models\SchemeEnrollment;
+use App\Services\GetCustomerLedgerReportSyncService;
 use App\Services\GetSchemesByMobileNumberSyncService;
 use App\Services\SchemeSyncService;
 use App\Services\ThirdPartyApiService;
@@ -24,7 +25,8 @@ class SchemesController extends Controller
     public function __construct(
         private readonly ThirdPartyApiService $thirdPartyApi,
         private readonly SchemeSyncService $schemeSync,
-        private readonly GetSchemesByMobileNumberSyncService $getSchemesSync
+        private readonly GetSchemesByMobileNumberSyncService $getSchemesSync,
+        private readonly GetCustomerLedgerReportSyncService $ledgerReportSync
     ) {
     }
 
@@ -301,8 +303,9 @@ class SchemesController extends Controller
 
     /**
      * Get Customer Ledger – transaction history and financial info by enrollment number.
+     * Calls third-party API, stores response in customer_scheme_details and customer_ledger_collections,
+     * then returns the same response shape from the stored data.
      * GET /api/externals/getCustomerLedgerReport?EnrollmentNo=...
-     * Proxies to third-party: .../thirdparty/api/externals/getCustomerLedgerReport?access_token=...&EnrollmentNo=...
      */
     public function getCustomerLedgerReport(Request $request): JsonResponse
     {
@@ -332,6 +335,17 @@ class SchemesController extends Controller
             ], $status >= 400 ? $status : 200);
         }
 
-        return response()->json($response);
+        $errorBlock = $response['error'] ?? [];
+        $statusCode = (int) ($errorBlock['status'] ?? 200);
+        if ($statusCode !== 200) {
+            return response()->json($response, $statusCode >= 400 ? $statusCode : 200);
+        }
+
+        $detail = $this->ledgerReportSync->syncFromResponse($response);
+        if (! $detail) {
+            return response()->json($response);
+        }
+
+        return response()->json($this->ledgerReportSync->buildResponseFromDetail($detail));
     }
 }

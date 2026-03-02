@@ -59,11 +59,15 @@ class AuthController extends Controller
             'id' => $customer->id,
             'mobile_no' => $customer->mobile_no,
             'email' => $customer->email,
+            'customer_code' => $customer->customer_code,
+            'customerId' => $customer->customerId,
         ];
         if ($customer->full_name !== null) {
             $userPayload['name'] = $customer->full_name;
             $userPayload['first_name'] = $customer->first_name;
             $userPayload['last_name'] = $customer->last_name;
+            $userPayload['customer_code'] = $customer->customer_code;
+            $userPayload['customerId'] = $customer->customerId;
         }
 
         return response()->json([

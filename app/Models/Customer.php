@@ -35,11 +35,55 @@ class Customer extends Authenticatable
     ];
 
     /**
+     * Automatically assign internal customerId and customer_code number series
+     * when a new customer is inserted and those fields are not provided.
+     */
+    protected static function booted(): void
+    {
+        static::created(function (Customer $customer): void {
+            $updates = [];
+
+            if ($customer->customerId === null) {
+                // Generate a large numeric series in a range unlikely to collide
+                // with external IDs, and ensure uniqueness even if data already exists.
+                $candidate = 90000000000000 + $customer->id;
+                while (static::where('customerId', $candidate)->exists()) {
+                    $candidate++;
+                }
+                $updates['customerId'] = $candidate;
+            }
+
+            if ($customer->customer_code === null) {
+                // EQL + zero-padded sequence; also guard for uniqueness.
+                $candidateCode = sprintf('EQL%08d', $customer->id);
+                $suffix = $customer->id;
+                while (static::where('customer_code', $candidateCode)->exists()) {
+                    $suffix++;
+                    $candidateCode = sprintf('EQL%08d', $suffix);
+                }
+                $updates['customer_code'] = $candidateCode;
+            }
+
+            if ($updates !== []) {
+                $customer->forceFill($updates)->save();
+            }
+        });
+    }
+
+    /**
      * Enrollments for getSchemesByMobileNumber (one customer, many enrollments).
      */
     public function schemeEnrollments(): HasMany
     {
         return $this->hasMany(SchemeEnrollment::class);
+    }
+
+    /**
+     * Ledger/scheme details from getCustomerLedgerReport (optional link by customer_id).
+     */
+    public function customerSchemeDetails(): HasMany
+    {
+        return $this->hasMany(CustomerSchemeDetail::class);
     }
 
     /**

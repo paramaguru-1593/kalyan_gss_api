@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 /**
  * Single scheme enrollment for a customer (getSchemesByMobileNumber response).
@@ -43,5 +44,13 @@ class SchemeEnrollment extends Model
     public function customer(): BelongsTo
     {
         return $this->belongsTo(Customer::class);
+    }
+
+    /**
+     * Ledger/scheme details from getCustomerLedgerReport for this enrollment (optional link).
+     */
+    public function customerSchemeDetail(): HasOne
+    {
+        return $this->hasOne(CustomerSchemeDetail::class);
     }
 }
