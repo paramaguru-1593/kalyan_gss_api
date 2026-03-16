@@ -23,6 +23,7 @@ class Customer extends Authenticatable
     protected $hidden = [
         'password',
         'remember_token',
+        'latest_otp',
     ];
 
     protected $casts = [
@@ -32,6 +33,8 @@ class Customer extends Authenticatable
         'nominee_dob' => 'date',
         'name_match_percentage' => 'decimal:2',
         'total_enrollments' => 'integer',
+        'otp_expires_at' => 'datetime',
+        'otp_last_sent_at' => 'datetime',
     ];
 
     /**
@@ -84,6 +87,22 @@ class Customer extends Authenticatable
     public function customerSchemeDetails(): HasMany
     {
         return $this->hasMany(CustomerSchemeDetail::class);
+    }
+
+    /**
+     * OTP verification history.
+     */
+    public function otpVerifications(): HasMany
+    {
+        return $this->hasMany(OtpVerification::class);
+    }
+
+    /**
+     * OTP SMS send logs.
+     */
+    public function otpSmsLogs(): HasMany
+    {
+        return $this->hasMany(OtpSmsLog::class);
     }
 
     /**

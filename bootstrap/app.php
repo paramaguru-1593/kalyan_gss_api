@@ -13,6 +13,8 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->validateCsrfTokens(except: [
+            'api/v1/otp/send',
+            'api/v1/otp/verify',
             'thirdparty/api/externals/gettermsandcondition',
             'thirdparty/api/enroll_new',
             'thirdparty/api/customerkycinfo',

@@ -7,6 +7,7 @@ use App\Http\Controllers\DocumanController;
 use App\Http\Controllers\EnrollmentController;
 use App\Http\Controllers\GoldRateController;
 use App\Http\Controllers\KycController;
+use App\Http\Controllers\OtpController;
 use App\Http\Controllers\PaymentController;
 use App\Http\Controllers\SchemesController;
 use App\Http\Controllers\TermsController;
@@ -15,6 +16,12 @@ Route::post('/v1/login', [AuthController::class, 'login']);
 
 Route::group(['middleware' => 'auth:customer-api'], function () {
     Route::post('/v1/logout', [AuthController::class, 'logout']);
+
+    // OTP: send and verify (rate limited, no auth required)
+    Route::middleware('throttle:10,1')->group(function (): void {
+        Route::post('/v1/otp/send', [OtpController::class, 'sendOtp']);
+        Route::post('/v1/otp/verify', [OtpController::class, 'verifyOtp']);
+    });
 
     Route::post('/update-personal-details', [CustomerController::class, 'updatePersonalDetails']);
     Route::post('/customerkycupdation', [CustomerController::class, 'customerKycUpdation']);
