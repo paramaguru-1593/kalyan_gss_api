@@ -2,6 +2,7 @@
 
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\BillDeskPaymentController;
 use App\Http\Controllers\CustomerController;
 use App\Http\Controllers\DocumanController;
 use App\Http\Controllers\EnrollmentController;
@@ -13,6 +14,7 @@ use App\Http\Controllers\SchemesController;
 use App\Http\Controllers\TermsController;
 
 Route::post('/v1/login', [AuthController::class, 'login']);
+Route::post('/payment/response', [BillDeskPaymentController::class,'paymentResponse']);
 
 Route::group(['middleware' => 'auth:customer-api'], function () {
     Route::post('/v1/logout', [AuthController::class, 'logout']);
@@ -62,4 +64,7 @@ Route::group(['middleware' => 'auth:customer-api'], function () {
     Route::post('/externals/schemebenifits', [GoldRateController::class, 'schemeBenefits']);
     Route::post('/externals/nomineedetails', [GoldRateController::class, 'nomineeDetails']);
     Route::post('/externals/get-pincode-details', [GoldRateController::class, 'getPincodeDetails']);
+
+    Route::post('/payment/request', [BillDeskPaymentController::class,'createPayment']);
+
 });
