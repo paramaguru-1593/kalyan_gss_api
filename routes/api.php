@@ -66,7 +66,8 @@ Route::group(['middleware' => 'auth:customer-api'], function () {
     Route::post('/externals/get-pincode-details', [GoldRateController::class, 'getPincodeDetails']);
 
     Route::post('/payment/request', [BillDeskPaymentController::class,'createPayment']);
-    Route::get('/v1/payment/response-details/{customerId}', [BillDeskPaymentController::class,'paymentResponseDetails']);
+    Route::post('/v1/payment/response-details', [BillDeskPaymentController::class,'paymentResponseDetails']);
+    Route::post('/v1/payment/transactions', [BillDeskPaymentController::class,'transactionHistory']);
     
     Route::post('/v1/payment/receipt-by-reference', [SchemePaymentController::class, 'getByBilldeskReference']);
 

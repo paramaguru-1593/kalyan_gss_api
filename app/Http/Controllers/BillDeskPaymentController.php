@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Customer;
 use App\Models\SchemeEnrollment;
 use App\Models\SchemePayment;
 use App\Services\BillDeskResponse;
@@ -81,69 +82,6 @@ class BillDeskPaymentController extends Controller
 
     }
 
-    // public function paymentResponse(Request $request)
-    // {
-    //     $msg = $request->msg;
-
-    //     $data = explode('|',$msg);
-
-    //     $referenceNo = $data[2];
-    //     $bankRef = $data[3];
-    //     $amount = $data[4];
-    //     $bankId = $data[5];
-    //     $authStatus = $data[14];
-
-    //     $payment = SchemePayment::where(
-    //         'billdesk_reference',
-    //         $referenceNo
-    //     )->first();
-
-    //     if(!$payment){
-    //         return "Invalid Payment";
-    //     }
-
-    //     $payment->bank_reference_no = $bankRef;
-    //     $payment->bank_id = $bankId;
-    //     $payment->gateway_response = $msg;
-
-    //     if($authStatus == "0300")
-    //     {
-
-    //         $payment->status = "SUCCESS";
-    //         $payment->payment_date = now();
-
-    //         $payment->save();
-
-    //         $enrollment = $payment->enrollment;
-
-    //         $enrollment->paid_amount += $amount;
-
-    //         $enrollment->pending_amount =
-    //             $enrollment->installment_amount
-    //             - $enrollment->paid_amount;
-
-    //         if($enrollment->pending_amount <= 0){
-    //             $enrollment->status = "COMPLETED";
-    //         }
-
-    //         $enrollment->save();
-
-    //     }
-    //     else
-    //     {
-    //         $payment->status = "FAILED";
-    //         $payment->save();
-    //     }
-
-    //     $REDIRECT_API_URL = env('APP_FRONTEND_URL') . "/payment-result?status=" . $payment->status;
-
-    //     return redirect($REDIRECT_API_URL);
-
-    //     // return redirect(
-    //     //     "https://uat-gss-api.kalyanm.in/payment-result?status=".$payment->status
-    //     // );
-    // }
-
     public function paymentResponse(Request $request)
     {
         $msg = $request->msg;
@@ -200,7 +138,7 @@ class BillDeskPaymentController extends Controller
         $customerId = $enrollment?->customer_id;
         $query = http_build_query(array_filter([
             'status' => $payment->status,
-            'customerId' => $customerId,
+            'refNo' => $payment->billdesk_reference,
         ], fn ($v) => $v !== null));
 
         $redirectUrl = env('APP_FRONTEND_URL') . "/payment-result?{$query}";
@@ -208,27 +146,42 @@ class BillDeskPaymentController extends Controller
         return redirect($redirectUrl);
     }
 
-    public function paymentResponseDetails(Request $request, int $customerId)
+    public function paymentResponseDetails(Request $request)
     {
-        $payment = SchemePayment::query()
-            ->whereHas('enrollment', function ($q) use ($customerId) {
+        $validated = $request->validate([
+            'billdesk_reference' => ['nullable', 'string', 'max:255', 'required_without:customerId'],
+            'customerId' => ['nullable', 'string', 'max:255', 'required_without:billdesk_reference'],
+        ]);
+
+        $paymentQuery = SchemePayment::query()->with('enrollment');
+
+        if (! empty($validated['billdesk_reference'] ?? null)) {
+            $paymentQuery->where('billdesk_reference', $validated['billdesk_reference']);
+        } else {
+            $customerId = $validated['customerId'];
+            $paymentQuery->whereHas('enrollment', function ($q) use ($customerId) {
                 $q->where('customer_id', $customerId);
             })
-            ->with('enrollment')
-            ->orderByDesc('payment_date')
-            ->orderByDesc('id')
-            ->first();
+                ->orderByDesc('payment_date')
+                ->orderByDesc('id');
+        }
+
+        $payment = $paymentQuery->first();
 
         if (!$payment) {
             return response()->json([
                 'success' => false,
-                'message' => 'No payment found for this customer',
+                'message' => 'Payment not found for the given reference/customer.',
             ], 404);
         }
 
         $billDesk = null;
-        if (!empty($payment->gateway_response)) {
-            $billDesk = new BillDeskResponse($payment->gateway_response);
+        if (! empty($payment->gateway_response) && strtoupper((string) $payment->payment_gateway) === 'BILLDESK') {
+            try {
+                $billDesk = new BillDeskResponse($payment->gateway_response);
+            } catch (\Throwable $e) {
+                $billDesk = null;
+            }
         }
 
         $txnDate = $billDesk?->txnDate ?? $payment->payment_date;
@@ -258,5 +211,76 @@ class BillDeskPaymentController extends Controller
                 'status' => $payment->status,
             ],
         ], 200);
+    }
+
+    /**
+     * Transaction history for a customer (SUCCESS only).
+     * POST /v1/payment/transactions/{customerId}
+     */
+    public function transactionHistory(Request $request)
+    {
+        $limit = (int) ($request->input('limit', $request->query('limit', 50)));
+        if ($limit <= 0) {
+            $limit = 50;
+        }
+        $limit = min($limit, 200);
+        $customerId = Customer::where("customerId" ,$request->customerId)->value('id');
+
+        $payments = SchemePayment::query()
+            ->where('status', 'SUCCESS')
+            ->whereHas('enrollment', function ($q) use ($customerId) {
+                $q->where('customer_id', $customerId);
+            })
+            ->with('enrollment')
+            ->orderByDesc('payment_date')
+            ->orderByDesc('id')
+            ->limit($limit)
+            ->get();
+
+        $data = $payments->map(function (SchemePayment $payment) {
+            $enrollment = $payment->enrollment;
+
+            $billDesk = null;
+            if (! empty($payment->gateway_response) && strtoupper((string) $payment->payment_gateway) === 'BILLDESK') {
+                try {
+                    $billDesk = new BillDeskResponse($payment->gateway_response);
+                } catch (\Throwable $e) {
+                    $billDesk = null;
+                }
+            }
+
+            $paymentDate = $billDesk?->txnDate ?? $payment->payment_date;
+            try {
+                $paymentDate = $paymentDate ? \Carbon\Carbon::parse($paymentDate)->format('Y-m-d') : null;
+            } catch (\Throwable $e) {
+                $paymentDate = $payment->payment_date?->format('Y-m-d');
+            }
+
+            $gatewayLabel = match (strtoupper((string) $payment->payment_gateway)) {
+                'BILLDESK' => 'Bill Desk',
+                'RAZORPAY' => 'Razorpay',
+                default => ucfirst(strtolower((string) $payment->payment_gateway)),
+            };
+
+            return [
+                'scheme' => $enrollment?->scheme_name,
+                'paymentGateway' => $gatewayLabel,
+                'amount' => (string) ($billDesk?->txnAmount ?? $payment->amount),
+                'status' => $payment->status,
+                'statusLabel' => 'Completed',
+                'paymentDate' => $paymentDate,
+                'enrollmentNo' => $enrollment?->enrollment_id,
+                'receiptId' => $payment->bank_reference_no
+                    ?? $billDesk?->txnReferenceNo
+                    ?? $payment->billdesk_reference,
+                'paymentId' => $payment->id,
+                'billdeskReference' => $payment->billdesk_reference,
+            ];
+        })->values();
+
+        return response()->json([
+            'success' => true,
+            'data' => $data,
+        ]);
     }
 }
