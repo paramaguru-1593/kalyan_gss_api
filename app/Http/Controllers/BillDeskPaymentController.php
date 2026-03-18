@@ -169,14 +169,14 @@ class BillDeskPaymentController extends Controller
         $payment->bank_id = $billDesk->bankID;
         $payment->gateway_response = $msg;
 
+        $enrollment = $payment->enrollment;
+
         if($billDesk->authStatus === "0300")
         {
             $payment->status = "SUCCESS";
             $payment->payment_date = now();
 
             $payment->save();
-
-            $enrollment = $payment->enrollment;
 
             $enrollment->paid_amount += $billDesk->txnAmount;
 
@@ -196,9 +196,67 @@ class BillDeskPaymentController extends Controller
             $payment->save();
         }
 
-        // Send Java-like response data to frontend
-        $redirectUrl = env('APP_FRONTEND_URL') . "/payment-result?status=" . $payment->status;
+        // Send Java-like response data to frontend with customerId
+        $customerId = $enrollment?->customer_id;
+        $query = http_build_query(array_filter([
+            'status' => $payment->status,
+            'customerId' => $customerId,
+        ], fn ($v) => $v !== null));
+
+        $redirectUrl = env('APP_FRONTEND_URL') . "/payment-result?{$query}";
 
         return redirect($redirectUrl);
+    }
+
+    public function paymentResponseDetails(Request $request, int $customerId)
+    {
+        $payment = SchemePayment::query()
+            ->whereHas('enrollment', function ($q) use ($customerId) {
+                $q->where('customer_id', $customerId);
+            })
+            ->with('enrollment')
+            ->orderByDesc('payment_date')
+            ->orderByDesc('id')
+            ->first();
+
+        if (!$payment) {
+            return response()->json([
+                'success' => false,
+                'message' => 'No payment found for this customer',
+            ], 404);
+        }
+
+        $billDesk = null;
+        if (!empty($payment->gateway_response)) {
+            $billDesk = new BillDeskResponse($payment->gateway_response);
+        }
+
+        $txnDate = $billDesk?->txnDate ?? $payment->payment_date;
+
+        $monthOfEmi = null;
+        try {
+            if ($txnDate) {
+                $monthOfEmi = strtoupper(\Carbon\Carbon::parse($txnDate)->format('M-Y'));
+            }
+        } catch (\Throwable $e) {
+            $monthOfEmi = null;
+        }
+
+        $enrollment = $payment->enrollment;
+
+        return response()->json([
+            'success' => $payment->status === 'SUCCESS',
+            'message' => $payment->status === 'SUCCESS' ? 'Payment successful' : 'Payment status',
+            'data' => [
+                'scheme' => $enrollment?->scheme_name,
+                'enrollmentId' => $enrollment?->enrollment_id,
+                'monthOfEmi' => $monthOfEmi,
+                'amount' => $billDesk?->txnAmount ?? $payment->amount,
+                'transactionReference' => $billDesk?->txnReferenceNo ?? $payment->billdesk_reference,
+                'bankReference' => $billDesk?->customerID ?? $payment->bank_reference_no,
+                'transactionStatus' => $billDesk?->txnStatus ?? ($payment->status === 'SUCCESS' ? 'Successful Transaction' : 'Cancel Transaction'),
+                'status' => $payment->status,
+            ],
+        ], 200);
     }
 }
