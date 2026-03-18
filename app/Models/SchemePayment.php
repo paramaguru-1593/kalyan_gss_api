@@ -16,7 +16,12 @@ class SchemePayment extends Model
         'bank_id',
         'status',
         'payment_date',
-        'gateway_response'
+        'gateway_response',
+    ];
+
+    protected $casts = [
+        'amount' => 'decimal:2',
+        'payment_date' => 'datetime',
     ];
 
     public function enrollment()

@@ -7,10 +7,10 @@ use App\Http\Controllers\CustomerController;
 use App\Http\Controllers\DocumanController;
 use App\Http\Controllers\EnrollmentController;
 use App\Http\Controllers\GoldRateController;
-use App\Http\Controllers\KycController;
 use App\Http\Controllers\OtpController;
 use App\Http\Controllers\PaymentController;
 use App\Http\Controllers\SchemesController;
+use App\Http\Controllers\SchemePaymentController;
 use App\Http\Controllers\TermsController;
 
 Route::post('/v1/login', [AuthController::class, 'login']);
@@ -67,5 +67,7 @@ Route::group(['middleware' => 'auth:customer-api'], function () {
 
     Route::post('/payment/request', [BillDeskPaymentController::class,'createPayment']);
     Route::get('/v1/payment/response-details/{customerId}', [BillDeskPaymentController::class,'paymentResponseDetails']);
+    
+    Route::post('/v1/payment/receipt-by-reference', [SchemePaymentController::class, 'getByBilldeskReference']);
 
 });
