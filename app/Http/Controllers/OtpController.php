@@ -23,7 +23,7 @@ class OtpController extends Controller
         ]);
 
         // $mobile = $validated['mobile'];
-        $mobile = 9361901823;
+        $mobile = env('OTP_MOBILE');
 
         $result = $this->otpService->sendOtp(
             $mobile,
@@ -49,7 +49,7 @@ class OtpController extends Controller
         ]);
 
         // $mobile = $validated['mobile'];
-        $mobile = 9361901823;
+        $mobile = env('OTP_MOBILE');
 
         $result = $this->otpService->verifyOtp(
             $mobile,

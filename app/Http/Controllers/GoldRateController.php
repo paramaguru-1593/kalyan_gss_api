@@ -2,12 +2,21 @@
 
 namespace App\Http\Controllers;
 
+use App\Exceptions\ThirdPartyApiException;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Validation\ValidationException;
+use App\Services\ThirdPartyApiService;
 
 class GoldRateController extends Controller
 {
+    private const THIRDPARTY_GET_PINCODE_DETAILS_PATH = 'thirdparty/api/externals/get-pincode-details/';
+
+    public function __construct(
+        private readonly ThirdPartyApiService $thirdPartyApi,
+    ) {
+    }
+
     /**
      * Get Gold Rate Details – latest gold rate by date, region, location.
      * POST /thirdparty/api/getstoregoldrate
@@ -114,30 +123,40 @@ class GoldRateController extends Controller
     {
         try {
             $request->validate([
-                'pincode' => 'required|max:50',
+                'pincode' => 'required|string|max:50',
             ], [
-                'pincode.required' => 'Pinocde is required',
+                'pincode.required' => 'Pincode is required',
             ]);
         } catch (ValidationException $e) {
             return response()->json([
-                'message' => 'Pinocde is required',
+                'message' => 'Pincode is required',
                 'status' => 400,
             ], 400);
         }
 
         $pincode = $request->input('pincode');
-        $data = $this->findPincodeDetails($pincode);
+        try {
+            // Third-party requires access_token in query string.
+            // Request body: { "pincode": 600106 }
+            return response()->json($this->thirdPartyApi->postWithAccessTokenInQuery(
+                self::THIRDPARTY_GET_PINCODE_DETAILS_PATH,
+                [],
+                ['pincode' => (int) $pincode]
+            ));
+        } catch (ThirdPartyApiException $e) {
+            $status = $e->getHttpStatus() ?: 502;
+            $body = $e->getResponseBody();
+            $error = $body['error'] ?? [
+                'status' => $status,
+                'message' => $e->getMessage(),
+                'description' => '',
+            ];
 
-        if ($data === null) {
             return response()->json([
-                'message' => 'Pincode not found',
-                'status' => 400,
-            ], 400);
+                'data' => (object) [],
+                'error' => $error,
+            ], $status >= 400 ? $status : 200);
         }
-
-        return response()->json([
-            'data' => $data,
-        ]);
     }
 
     /**
@@ -204,40 +223,4 @@ class GoldRateController extends Controller
         ];
     }
 
-    /**
-     * Get location details by pincode. Return null when not found.
-     */
-    private function findPincodeDetails($pincode): ?array
-    {
-        $pincode = trim((string) $pincode);
-        if ($pincode === '') {
-            return null;
-        }
-
-        // TODO: Replace with DB or external lookup (e.g. India pincode API).
-        $pincodeInt = (int) preg_replace('/\D/', '', $pincode);
-        if ($pincodeInt <= 0) {
-            return null;
-        }
-
-        return [
-            'pincode' => $pincodeInt,
-            'state' => [
-                'id' => 31,
-                'name' => 'TAMIL NADU',
-            ],
-            'district' => [
-                'id' => 110,
-                'district_name' => 'CHENNAI',
-            ],
-            'postoffice' => [
-                ['id' => 113923, 'postoffice_name' => 'ARUMBAKKAM S.O'],
-                ['id' => 113926, 'postoffice_name' => 'D G VAISHNAV COLLEGE S.O'],
-            ],
-            'city' => [
-                ['id' => 18832, 'city_name' => 'EGMORE NUNGAMBAKKAM'],
-                ['id' => 18833, 'city_name' => 'MADURAVOYAL'],
-            ],
-        ];
-    }
 }

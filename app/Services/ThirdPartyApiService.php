@@ -46,6 +46,24 @@ class ThirdPartyApiService
     }
 
     /**
+     * POST request with access_token in query string.
+     *
+     * Some MyKalyan externals APIs require access_token in the query, even for POST.
+     *
+     * @param  array<string, mixed>  $query
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     * @throws ThirdPartyApiException
+     */
+    public function postWithAccessTokenInQuery(string $path, array $query = [], array $data = []): array
+    {
+        $token = $this->authService->getValidToken();
+        $query['access_token'] = $token;
+
+        return $this->request('post', $path, ['query' => $query, 'json' => $data], false)->json() ?? [];
+    }
+
+    /**
      * POST request to the third-party API.
      *
      * @param  array<string, mixed>  $data
@@ -114,13 +132,23 @@ class ThirdPartyApiService
             $request = $request->withToken($token);
         }
 
+        $query = $options['query'] ?? [];
+        $methodLower = strtolower($method);
+
+        // Laravel Http builds query params automatically for GET when passed as the 2nd argument.
+        // For non-GET methods, append the query to the URL manually (required for some 3rd-party APIs).
+        if ($methodLower !== 'get' && $query !== []) {
+            $queryString = http_build_query($query);
+            $url .= (str_contains($url, '?') ? '&' : '?') . $queryString;
+        }
+
         $hasJson = isset($options['json']);
         if ($hasJson) {
             $request = $request->asJson();
         }
 
-        $response = match (strtolower($method)) {
-            'get' => $request->get($url, $options['query'] ?? []),
+        $response = match ($methodLower) {
+            'get' => $request->get($url, $query),
             'post' => $request->post($url, $options['json'] ?? []),
             'put' => $request->put($url, $options['json'] ?? []),
             'patch' => $request->patch($url, $options['json'] ?? []),
