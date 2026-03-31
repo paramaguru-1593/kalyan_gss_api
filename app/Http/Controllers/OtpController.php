@@ -22,8 +22,8 @@ class OtpController extends Controller
             'mobile' => ['required', 'string', 'max:50'],
         ]);
 
-        // $mobile = $validated['mobile'];
-        $mobile = env('OTP_MOBILE');
+        $mobile = $validated['mobile'];
+        // $mobile = env('OTP_MOBILE');
 
         $result = $this->otpService->sendOtp(
             $mobile,
@@ -48,8 +48,8 @@ class OtpController extends Controller
             'otp.regex' => 'OTP must be numeric.',
         ]);
 
-        // $mobile = $validated['mobile'];
-        $mobile = env('OTP_MOBILE');
+        $mobile = $validated['mobile'];
+        // $mobile = env('OTP_MOBILE');
 
         $result = $this->otpService->verifyOtp(
             $mobile,

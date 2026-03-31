@@ -6,6 +6,7 @@ use App\Models\Customer;
 use App\Models\CustomerLedgerCollection;
 use App\Models\CustomerSchemeDetail;
 use App\Models\SchemeEnrollment;
+use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -114,17 +115,17 @@ class GetCustomerLedgerReportSyncService
         $collections = $detail->collections->map(function (CustomerLedgerCollection $c) {
             $dateStr = $c->collection_date ? $c->collection_date->format('Y-F-j') : null; // e.g. 2024-December-12
             return [
-                'ReferenceNo' => $c->reference_no !== null && is_numeric($c->reference_no) ? (int) $c->reference_no : $c->reference_no,
-                'MOP' => $c->mop,
-                'Remarks' => $c->remarks,
+                'ReferenceNo' => $this->formatReferenceNoForApi($c->reference_no),
+                'MOP' => $c->mop ?? '',
+                'Remarks' => $this->formatRemarksForApi($c->remarks),
                 'Date' => $dateStr,
-                'Amount' => $c->amount !== null ? (int) $c->amount : null,
+                'Amount' => $c->amount !== null ? (int) round((float) $c->amount) : null,
                 'IssuedDate' => $c->issued_date ? $c->issued_date->format('Y-m-d') : null,
                 'ChequeNumber' => $c->cheque_number,
-                'EMIMonth' => $c->emi_month,
-                'PaymentStatus' => $c->payment_status,
-                'goldrate' => $c->gold_rate,
-                'goldweight' => $c->gold_weight,
+                'EMIMonth' => $this->formatEmiMonthForApi($c->emi_month, $c->collection_date),
+                'PaymentStatus' => $this->formatPaymentStatusForApi($c->payment_status),
+                'goldrate' => $c->gold_rate !== null ? (float) $c->gold_rate : null,
+                'goldweight' => $c->gold_weight !== null ? (float) $c->gold_weight : null,
             ];
         })->values()->all();
 
@@ -325,5 +326,81 @@ class GetCustomerLedgerReportSyncService
             return null;
         }
         return (float) $value;
+    }
+
+    /**
+     * API doc: ReferenceNo as integer when numeric, else string.
+     *
+     * @return int|string|null
+     */
+    private function formatReferenceNoForApi($referenceNo)
+    {
+        if ($referenceNo === null || $referenceNo === '') {
+            return null;
+        }
+        if (is_numeric($referenceNo)) {
+            return (int) $referenceNo;
+        }
+
+        return (string) $referenceNo;
+    }
+
+    /**
+     * API doc: "NA" when no remarks.
+     */
+    private function formatRemarksForApi(?string $remarks): string
+    {
+        $remarks = $remarks !== null ? trim($remarks) : '';
+
+        return $remarks !== '' ? $remarks : 'NA';
+    }
+
+    /**
+     * API doc: "December 2024" style EMIMonth.
+     */
+    private function formatEmiMonthForApi(?string $emiMonth, $collectionDate): ?string
+    {
+        $emiMonth = $emiMonth !== null ? trim($emiMonth) : '';
+        if ($emiMonth !== '') {
+            // Already "December 2024"
+            if (preg_match('/^[A-Za-z]+\s+\d{4}$/', $emiMonth)) {
+                return $emiMonth;
+            }
+            // MAR-2026 / MAR-2024
+            if (preg_match('/^([A-Za-z]{3})-(\d{4})$/', $emiMonth, $m)) {
+                try {
+                    return Carbon::createFromFormat('M-Y', strtoupper($m[1]) . '-' . $m[2])->format('F Y');
+                } catch (\Throwable $e) {
+                    // fall through
+                }
+            }
+            $parsed = strtotime($emiMonth);
+            if ($parsed !== false) {
+                return date('F Y', $parsed);
+            }
+        }
+        if ($collectionDate) {
+            return $collectionDate->format('F Y');
+        }
+
+        return $emiMonth !== '' ? $emiMonth : null;
+    }
+
+    /**
+     * API doc: "Completed", "Pending", etc.
+     */
+    private function formatPaymentStatusForApi(?string $status): ?string
+    {
+        if ($status === null || trim($status) === '') {
+            return null;
+        }
+        $normalized = strtolower(trim($status));
+
+        return match ($normalized) {
+            'completed', 'success' => 'Completed',
+            'pending' => 'Pending',
+            'failed', 'fail' => 'Failed',
+            default => ucfirst($normalized),
+        };
     }
 }

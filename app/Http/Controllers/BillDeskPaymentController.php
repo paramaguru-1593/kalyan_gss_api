@@ -3,6 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Models\Customer;
+use App\Models\CustomerLedgerCollection;
+use App\Models\CustomerSchemeDetail;
 use App\Models\SchemeEnrollment;
 use App\Models\SchemePayment;
 use App\Services\BillDeskResponse;
@@ -49,6 +51,9 @@ class BillDeskPaymentController extends Controller
             'status'=>'PENDING'
 
         ]);
+
+        // Create current month ledger collection as pending if missing.
+        $this->ensureCurrentMonthPendingCollection($enrollment, (float) $amount);
 
         $merchantId = env('BILLDESK_MERCHANT_ID');
         $securityId = env('BILLDESK_SECURITY_ID');
@@ -116,6 +121,8 @@ class BillDeskPaymentController extends Controller
 
             $payment->save();
 
+            $this->markCurrentMonthCollectionCompleted($enrollment, $payment, $billDesk);
+
             $enrollment->paid_amount += $billDesk->txnAmount;
 
             $enrollment->pending_amount =
@@ -144,6 +151,99 @@ class BillDeskPaymentController extends Controller
         $redirectUrl = env('APP_FRONTEND_URL') . "/payment-result?{$query}";
 
         return redirect($redirectUrl);
+    }
+
+    private function ensureCurrentMonthPendingCollection(SchemeEnrollment $enrollment, ?float $amount = null): void
+    {
+        $detail = $this->resolveOrCreateSchemeDetail($enrollment);
+        $emiMonth = strtoupper(now()->format('M-Y'));
+
+        $existing = CustomerLedgerCollection::query()
+            ->where('customer_scheme_detail_id', $detail->id)
+            ->where('emi_month', $emiMonth)
+            ->first();
+
+        if ($existing) {
+            return;
+        }
+
+        CustomerLedgerCollection::create([
+            'customer_scheme_detail_id' => $detail->id,
+            'reference_no' => null,
+            'mop' => null,
+            'remarks' => 'Auto-created monthly entry',
+            'collection_date' => null,
+            'amount' => $amount ?? (float) $enrollment->installment_amount,
+            'issued_date' => null,
+            'cheque_number' => null,
+            'emi_month' => $emiMonth,
+            'payment_status' => 'pending',
+            'gold_rate' => null,
+            'gold_weight' => null,
+        ]);
+    }
+
+    private function markCurrentMonthCollectionCompleted(
+        SchemeEnrollment $enrollment,
+        SchemePayment $payment,
+        BillDeskResponse $billDesk
+    ): void {
+        $detail = $this->resolveOrCreateSchemeDetail($enrollment);
+        $emiMonth = strtoupper(now()->format('M-Y'));
+        $paidAmount = (float) ($billDesk->txnAmount ?? $payment->amount ?? 0);
+
+        $collection = CustomerLedgerCollection::query()
+            ->where('customer_scheme_detail_id', $detail->id)
+            ->where('emi_month', $emiMonth)
+            ->where(function ($query) {
+                $query->whereNull('payment_status')
+                    ->orWhereRaw('LOWER(payment_status) = ?', ['pending']);
+            })
+            ->orderByDesc('id')
+            ->first();
+
+        if (! $collection) {
+            $collection = CustomerLedgerCollection::query()
+                ->where('customer_scheme_detail_id', $detail->id)
+                ->where('emi_month', $emiMonth)
+                ->orderByDesc('id')
+                ->first();
+        }
+
+        if (! $collection) {
+            $collection = new CustomerLedgerCollection([
+                'customer_scheme_detail_id' => $detail->id,
+                'emi_month' => $emiMonth,
+            ]);
+        }
+
+        $collection->reference_no = (string) ($payment->billdesk_reference ?? '');
+        $collection->mop = 'Online';
+        $collection->remarks = 'BillDesk payment success';
+        $collection->collection_date = now()->toDateString();
+        $collection->issued_date = now()->toDateString();
+        $collection->amount = $paidAmount;
+        $collection->payment_status = 'completed';
+        $collection->save();
+    }
+
+    private function resolveOrCreateSchemeDetail(SchemeEnrollment $enrollment): CustomerSchemeDetail
+    {
+        return CustomerSchemeDetail::query()->firstOrCreate(
+            ['enrollment_no' => (string) $enrollment->enrollment_id],
+            [
+                'customer_id' => $enrollment->customer_id,
+                'scheme_enrollment_id' => $enrollment->id,
+                'scheme_id' => $enrollment->scheme_id,
+                'scheme_name' => $enrollment->scheme_name,
+                'scheme_status' => $enrollment->status,
+                'join_date' => $enrollment->enrollment_date,
+                'maturity_date' => $enrollment->maturity_date,
+                'emi' => (float) $enrollment->installment_amount,
+                'paid_amount' => (float) $enrollment->paid_amount,
+                'remaining_amount' => (float) $enrollment->pending_amount,
+            ]
+        );
     }
 
     public function paymentResponseDetails(Request $request)

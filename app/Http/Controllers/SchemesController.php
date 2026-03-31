@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Exceptions\ThirdPartyApiException;
 use App\Models\Customer;
+use App\Models\CustomerSchemeDetail;
 use App\Models\Scheme;
 use App\Models\SchemeEnrollment;
 use App\Services\GetCustomerLedgerReportSyncService;
@@ -18,7 +19,6 @@ class SchemesController extends Controller
 {
     /** Third-party path: GET with access_token in query (MyKalyan externals). */
     private const THIRDPARTY_GET_SCHEMES_PATH = 'thirdparty/api/externals/getSchemesByMobileNumber';
-    private const THIRDPARTY_GET_CUSTOMER_LEDGER_PATH = 'thirdparty/api/externals/getCustomerLedgerReport';
     private const THIRDPARTY_GET_ACCOUNT_INFO_PATH = 'thirdparty/api/Enrollment_tbs/getAccountInformation';
     private const THIRDPARTY_STOREBASED_SCHEME_PATH = 'thirdparty/api/storebasedscheme_data';
 
@@ -303,8 +303,7 @@ class SchemesController extends Controller
 
     /**
      * Get Customer Ledger – transaction history and financial info by enrollment number.
-     * Calls third-party API, stores response in customer_scheme_details and customer_ledger_collections,
-     * then returns the same response shape from the stored data.
+     * Reads from customer_scheme_details and customer_ledger_collections only (no third-party call).
      * GET /api/externals/getCustomerLedgerReport?EnrollmentNo=...
      */
     public function getCustomerLedgerReport(Request $request): JsonResponse
@@ -315,35 +314,21 @@ class SchemesController extends Controller
             'EnrollmentNo.required' => 'EnrollmentNo is required',
         ]);
 
-        $enrollmentNo = $request->query('EnrollmentNo');
+        $enrollmentNo = trim((string) $request->query('EnrollmentNo'));
+        $detail = CustomerSchemeDetail::query()
+            ->where('enrollment_no', $enrollmentNo)
+            ->with('collections')
+            ->first();
 
-        try {
-            $response = $this->thirdPartyApi->getWithAccessTokenInQuery(self::THIRDPARTY_GET_CUSTOMER_LEDGER_PATH, [
-                'EnrollmentNo' => $enrollmentNo,
-            ]);
-        } catch (ThirdPartyApiException $e) {
-            $status = $e->getHttpStatus() ?: 502;
-            $body = $e->getResponseBody();
-            $error = $body['error'] ?? [
-                'status' => $status,
-                'message' => $e->getMessage(),
-                'description' => '',
-            ];
-            return response()->json([
-                'data' => $body['data'] ?? (object) [],
-                'error' => $error,
-            ], $status >= 400 ? $status : 200);
-        }
-
-        $errorBlock = $response['error'] ?? [];
-        $statusCode = (int) ($errorBlock['status'] ?? 200);
-        if ($statusCode !== 200) {
-            return response()->json($response, $statusCode >= 400 ? $statusCode : 200);
-        }
-
-        $detail = $this->ledgerReportSync->syncFromResponse($response);
         if (! $detail) {
-            return response()->json($response);
+            return response()->json([
+                'data' => (object) [],
+                'error' => [
+                    'status' => 10000,
+                    'message' => 'No Data Found',
+                    'description' => 'Failed',
+                ],
+            ], 200);
         }
 
         return response()->json($this->ledgerReportSync->buildResponseFromDetail($detail));

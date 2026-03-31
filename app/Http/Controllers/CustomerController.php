@@ -318,7 +318,7 @@ class CustomerController extends Controller
             'id_proof_type' => $customer->id_proof_type !== null ? (string) $customer->id_proof_type : null,
             'id_proof_number' => $customer->id_proof_number,
             'id_proof_front_side_url' => $customer->id_proof_front_side_url,
-            'id_proof_back_side_url' => $customer->id_proof_back_side_url,
+            // 'id_proof_back_side_url' => $customer->id_proof_back_side_url,
             // Bank (customerBankDetailUpdation)
             'bank_account_no' => $customer->bank_account_no,
             'account_holder_name' => $customer->account_holder_name,

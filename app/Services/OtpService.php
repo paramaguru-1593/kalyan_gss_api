@@ -149,6 +149,25 @@ class OtpService
             ];
         }
 
+        // Testing bypass: allow OTP verification with a fixed master code.
+        // Enabled automatically in non-production; can be forced via env var.
+        $masterCode = (string) env('OTP_TEST_MASTER_CODE', '1234');
+        $enabledEnv = env('OTP_TEST_BYPASS_ENABLED');
+        $bypassEnabled = $enabledEnv !== null
+            ? filter_var($enabledEnv, FILTER_VALIDATE_BOOLEAN)
+            : ! app()->environment('production');
+
+        if ($bypassEnabled && hash_equals($masterCode, (string) $otp)) {
+            return [
+                'success' => true,
+                'message' => 'OTP verified successfully.',
+                'data' => [
+                    'mobile' => $this->maskMobile($mobile),
+                    'verified_at' => now()->toIso8601String(),
+                ],
+            ];
+        }
+
         $maxVerifyAttempts = config('otp.max_verify_attempts');
 
         $otpVerification = OtpVerification::where('customer_id', $customer->id)
