@@ -327,7 +327,6 @@ class BillDeskPaymentController extends Controller
         $customerId = Customer::where("customerId" ,$request->customerId)->value('id');
 
         $payments = SchemePayment::query()
-            ->where('status', 'SUCCESS')
             ->whereHas('enrollment', function ($q) use ($customerId) {
                 $q->where('customer_id', $customerId);
             })
@@ -362,12 +361,14 @@ class BillDeskPaymentController extends Controller
                 default => ucfirst(strtolower((string) $payment->payment_gateway)),
             };
 
+            $isSuccess = strtoupper((string) $payment->status) === 'SUCCESS';
+
             return [
                 'scheme' => $enrollment?->scheme_name,
                 'paymentGateway' => $gatewayLabel,
                 'amount' => (string) ($billDesk?->txnAmount ?? $payment->amount),
                 'status' => $payment->status,
-                'statusLabel' => 'Completed',
+                'statusLabel' => $payment->status,
                 'paymentDate' => $paymentDate,
                 'enrollmentNo' => $enrollment?->enrollment_id,
                 'receiptId' => $payment->bank_reference_no
