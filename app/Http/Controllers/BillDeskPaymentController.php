@@ -331,7 +331,7 @@ class BillDeskPaymentController extends Controller
                 $q->where('customer_id', $customerId);
             })
             ->with('enrollment')
-            ->orderByDesc('payment_date')
+            ->orderByDesc('created_at')
             ->orderByDesc('id')
             ->limit($limit)
             ->get();

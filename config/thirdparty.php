@@ -24,6 +24,8 @@ return [
         'token_name' => env('THIRDPARTY_TOKEN_NAME', 'mykalyan'),
         'buffer_seconds' => (int) env('THIRDPARTY_TOKEN_BUFFER_SECONDS', 300),
         'lock_seconds' => (int) env('THIRDPARTY_LOCK_SECONDS', 30),
+        /** POST body: Date, Region, Location, Transaction_ID; access_token in query. */
+        'gold_rate_path' => env('THIRDPARTY_GOLD_RATE_PATH', 'thirdparty/api/getstoregoldrate'),
     ],
 
 ];

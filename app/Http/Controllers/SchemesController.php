@@ -46,7 +46,9 @@ class SchemesController extends Controller
 
         $mobileNumber = $this->normalizeMobile((string) $request->query('MobileNumber'));
 
-        $customer = Customer::where('mobile_no', $mobileNumber)->with('schemeEnrollments')->first();
+        $customer = Customer::where('mobile_no', $mobileNumber)->with('schemeEnrollments')
+        ->orderBy('created_at', 'desc')
+        ->first();
 
         if (! $customer) {
             try {

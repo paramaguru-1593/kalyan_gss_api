@@ -37,7 +37,22 @@ class GoldRateController extends Controller
             ], 400);
         }
 
-        $result = $this->fetchGoldRate($validated);
+        try {
+            $result = $this->fetchGoldRate($validated);
+        } catch (ThirdPartyApiException $e) {
+            $status = $e->getHttpStatus() ?: 502;
+            $body = $e->getResponseBody();
+            $error = $body['error'] ?? [
+                'status' => $status,
+                'message' => $e->getMessage(),
+                'description' => '',
+            ];
+
+            return response()->json([
+                'data' => (object) [],
+                'error' => $error,
+            ], $status >= 400 ? $status : 200);
+        }
 
         if ($result === null) {
             return response()->json([
@@ -160,16 +175,24 @@ class GoldRateController extends Controller
     }
 
     /**
-     * Fetch gold rate for given date/region/location. Return null if Transaction_ID not unique or invalid.
+     * Fetch gold rate from MyKalyan third-party API (same pattern as get-pincode-details).
+     * Return null if Transaction_ID not unique or invalid (reserved for future idempotency checks).
      */
     private function fetchGoldRate(array $input): ?array
     {
-        // TODO: Check Transaction_ID uniqueness (e.g. DB/cache) and fetch real rate.
-        return [
-            'MetalType' => 'Gold',
-            'Purity' => '995',
-            'NetRate' => 15690.000,
-        ];
+        $path = (string) config('thirdparty.mykalyan.gold_rate_path', 'thirdparty/api/getstoregoldrate');
+        $path = ltrim($path, '/');
+
+        return $this->thirdPartyApi->postWithAccessTokenInQuery(
+            $path,
+            [],
+            [
+                'Date' => $input['Date'],
+                'Region' => $input['Region'],
+                'Location' => $input['Location'],
+                'Transaction_ID' => $input['Transaction_ID'],
+            ]
+        );
     }
 
     /**
