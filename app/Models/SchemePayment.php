@@ -17,6 +17,7 @@ class SchemePayment extends Model
         'status',
         'payment_date',
         'gateway_response',
+        'collection_receipt_id',
     ];
 
     protected $casts = [

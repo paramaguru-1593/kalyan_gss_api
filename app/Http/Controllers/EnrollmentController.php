@@ -2,60 +2,63 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Customer;
-use App\Models\Scheme;
-use App\Models\SchemeEnrollment;
-use Carbon\Carbon;
-use Illuminate\Http\Request;
+use App\Exceptions\ThirdPartyApiException;
+use App\Services\ThirdPartyApiService;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
 
 class EnrollmentController extends Controller
 {
+    public function __construct(
+        private readonly ThirdPartyApiService $thirdPartyApi,
+    ) {
+    }
+
     /**
-     * Create and persist enrollment (scheme, EMI, tenure, nominee, payment).
-     * POST /thirdparty/api/enroll_new
-     * Header: content-type: application/json. access_token optional (not validated).
+     * Create enrollment via MyKalyan (scheme, EMI, tenure, nominee, payment).
+     * POST /api/v2/enroll_new — proxies to POST {base}/thirdparty/api/enroll_new?access_token=...
      */
     public function enrollNew(Request $request): JsonResponse
     {
         try {
             $validated = $request->validate([
-            'scheme_id' => 'required|integer',
-            'customer_id' => 'required|integer',
-            'mobile_no' => 'required|string|max:50',
-            'tenure' => 'required|integer',
-            'emi_amount' => 'required|numeric',
-            'mode_of_pay' => 'required|string|max:50',
-            'nominee_first_name' => 'required|string|max:255',
-            'nominee_last_name' => 'required|string|max:255',
-            'nominee_mobile_no' => 'required|string|max:50',
-            'nominee_relation' => 'required|string|max:50',
-            'nominee_pincode_id' => 'required|integer',
-            'nominee_state' => 'required|string|max:255',
-            'nominee_district' => 'required|string|max:255',
-            'nominee_city' => 'required|string|max:255',
-            'nominee_street' => 'required|string|max:255',
-            'nominee_house_no' => 'required|max:255', // Char in doc; sample uses number 10
-        ], [], [
-            'scheme_id' => 'scheme_id',
-            'customer_id' => 'customer_id',
-            'mobile_no' => 'mobile_no',
-            'tenure' => 'tenure',
-            'emi_amount' => 'emi_amount',
-            'mode_of_pay' => 'mode_of_pay',
-            'nominee_first_name' => 'nominee_first_name',
-            'nominee_last_name' => 'nominee_last_name',
-            'nominee_mobile_no' => 'nominee_mobile_no',
-            'nominee_relation' => 'nominee_relation',
-            'nominee_pincode_id' => 'nominee_pincode_id',
-            'nominee_state' => 'nominee_state',
-            'nominee_district' => 'nominee_district',
-            'nominee_city' => 'nominee_city',
-            'nominee_street' => 'nominee_street',
-            'nominee_house_no' => 'nominee_house_no',
-        ]);
+                'scheme_id' => 'required|integer',
+                'customer_id' => 'required|integer',
+                'mobile_no' => 'required|string|max:50',
+                'tenure' => 'required|integer',
+                'emi_amount' => 'required|numeric',
+                'mode_of_pay' => 'required|string|max:50',
+                'externalId' => 'nullable|string|max:100',
+                'nominee_first_name' => 'required|string|max:255',
+                'nominee_last_name' => 'required|string|max:255',
+                'nominee_mobile_no' => 'required|string|max:50',
+                'nominee_relation' => 'required|string|max:50',
+                'nominee_pincode_id' => 'required|integer',
+                'nominee_state' => 'required|string|max:255',
+                'nominee_district' => 'required|string|max:255',
+                'nominee_city' => 'required|string|max:255',
+                'nominee_street' => 'required|string|max:255',
+                'nominee_house_no' => 'required',
+            ], [], [
+                'scheme_id' => 'scheme_id',
+                'customer_id' => 'customer_id',
+                'mobile_no' => 'mobile_no',
+                'tenure' => 'tenure',
+                'emi_amount' => 'emi_amount',
+                'mode_of_pay' => 'mode_of_pay',
+                'externalId' => 'externalId',
+                'nominee_first_name' => 'nominee_first_name',
+                'nominee_last_name' => 'nominee_last_name',
+                'nominee_mobile_no' => 'nominee_mobile_no',
+                'nominee_relation' => 'nominee_relation',
+                'nominee_pincode_id' => 'nominee_pincode_id',
+                'nominee_state' => 'nominee_state',
+                'nominee_district' => 'nominee_district',
+                'nominee_city' => 'nominee_city',
+                'nominee_street' => 'nominee_street',
+                'nominee_house_no' => 'nominee_house_no',
+            ]);
         } catch (ValidationException $e) {
             return response()->json([
                 'message' => 'Invalid Details',
@@ -63,80 +66,63 @@ class EnrollmentController extends Controller
             ], 400);
         }
 
-        $result = $this->persistEnrollment($validated);
+        $path = (string) config(
+            'thirdparty.mykalyan.enroll_new_path',
+            'thirdparty/api/enroll_new'
+        );
+        $path = ltrim($path, '/');
 
-        if ($result === null) {
-            return response()->json([
-                'message' => 'Invalid Details',
-                'status' => 400,
-            ], 400);
-        }
+        $payload = [
+            'RequestData' => [
+                'personalDetails' => [
+                    'mobileNumber' => $validated['mobile_no'],
+                ],
+                'schemeInfo' => [
+                    'scheme_id' => (int) $validated['scheme_id'],
+                    'customer_id' => (int) $validated['customer_id'],
+                    'tenure' => (int) $validated['tenure'],
+                    'emi_amount' => (string) $validated['emi_amount'],
+                    'mode_of_pay' => $validated['mode_of_pay'],
+                    'externalId' => $validated['externalId'] ?? null,
+                ],
+                'nomineeInfo' => [
+                    'firstName' => $validated['nominee_first_name'],
+                    'lastName' => $validated['nominee_last_name'],
+                    'mobileNumber' => $validated['nominee_mobile_no'],
+                    'relation' => $validated['nominee_relation'],
+                    'pincode_id' => (int) $validated['nominee_pincode_id'],
+                    'state' => $validated['nominee_state'],
+                    'district' => $validated['nominee_district'],
+                    'city' => $validated['nominee_city'],
+                    'street' => $validated['nominee_street'],
+                    'house_no' => $validated['nominee_house_no'],
+                ],
+            ],
+        ];
 
-        return response()->json([
-            'message' => 'Success',
-            'account_no' => $result['account_no'],
-            'receipt_no' => $result['receipt_no'],
-            'status' => 200,
-        ]);
-    }
+        try {
+            $response = $this->thirdPartyApi->postWithAccessTokenInBody($path, $payload);
+            return response()->json($response);
+        } catch (ThirdPartyApiException $e) {
+            $status = $e->getHttpStatus() ?: 502;
+            $body = $e->getResponseBody() ?? [];
 
-    /**
-     * Persist enrollment and return account_no & receipt_no, or null on failure.
-     */
-    private function persistEnrollment(array $data): ?array
-    {
-        return DB::transaction(function () use ($data): ?array {
-            // Find existing customer by external customerId; do not create a new customer here.
-            $externalCustomerId = (int) $data['customer_id'];
-            $customer = Customer::where('customerId', $externalCustomerId)->first();
+            if (isset($body['message'], $body['status'])) {
+                $errorStatus = (int) $body['status'];
 
-            if (! $customer) {
-                // Customer must exist before creating an enrollment.
-                return null;
+                return response()->json($body, $errorStatus > 0 ? $errorStatus : $status);
             }
 
-            $tenure = (int) $data['tenure'];
-            $emiAmount = (float) $data['emi_amount'];
-
-            $joinDate = Carbon::now();
-            $maturityDate = $tenure > 0 ? $joinDate->copy()->addMonths($tenure) : null;
-            $pendingAmount = $tenure > 0 ? $emiAmount * $tenure : 0.0;
-
-            // Generate a unique enrollment_id for this enrollment (account number).
-            $enrollmentId = null;
-            do {
-                $candidate = (string) (90000000000000 + random_int(1, 9_999_999));
-            } while (SchemeEnrollment::where('enrollment_id', $candidate)->exists());
-            $enrollmentId = $candidate;
-
-            $schemeName = Scheme::where('id', $data['scheme_id'])
-                ->value('scheme_name'); // Optional: can be set based on scheme_id if needed
-
-            $enrollment = new SchemeEnrollment([
-                'customer_id' => $customer->id,
-                'scheme_id' => (int) $data['scheme_id'],
-                'scheme_name' => $schemeName,
-                'enrollment_id' => $enrollmentId,
-                'enrollment_date' => $joinDate->toDateString(),
-                'maturity_date' => $maturityDate ? $maturityDate->toDateString() : null,
-                'installment_amount' => $emiAmount,
-                'paid_amount' => 0.0,
-                'pending_amount' => $pendingAmount,
-                'status' => 'Open',
-            ]);
-
-            $enrollment->save();
-            $customer->refreshTotalEnrollments();
-
-            return [
-                'account_no' => $enrollmentId,
-                'receipt_no' => 20000 + $enrollment->id,
+            $error = $body['error'] ?? [
+                'status' => $status,
+                'message' => $e->getMessage(),
+                'description' => '',
             ];
-        });
-    }
 
-    private function normalizeMobile(string $value): string
-    {
-        return trim(preg_replace('/\s+/', '', $value));
+            return response()->json([
+                'data' => (object) [],
+                'error' => $error,
+            ], $status >= 400 ? $status : 200);
+        }
     }
 }

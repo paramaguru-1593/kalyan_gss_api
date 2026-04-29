@@ -8,11 +8,16 @@ use App\Models\CustomerSchemeDetail;
 use App\Models\SchemeEnrollment;
 use App\Models\SchemePayment;
 use App\Services\BillDeskResponse;
+use App\Services\CollectionConfirmPaymentService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 
 class BillDeskPaymentController extends Controller
 {
+    public function __construct(
+        private readonly CollectionConfirmPaymentService $collectionConfirm,
+    ) {
+    }
 
     public static function checksum($message,$key)
     {
@@ -108,11 +113,20 @@ class BillDeskPaymentController extends Controller
             return "Invalid Payment";
         }
 
+        $enrollment = $payment->enrollment;
+
+        if (strtoupper((string) $payment->status) === 'SUCCESS') {
+            $query = http_build_query(array_filter([
+                'status' => $payment->status,
+                'refNo' => $payment->billdesk_reference,
+            ], fn ($v) => $v !== null));
+
+            return redirect(env('APP_FRONTEND_URL') . "/payment-result?{$query}");
+        }
+
         $payment->bank_reference_no = $billDesk->bankReferenceNo;
         $payment->bank_id = $billDesk->bankID;
         $payment->gateway_response = $msg;
-
-        $enrollment = $payment->enrollment;
 
         if($billDesk->authStatus === "0300")
         {
@@ -120,6 +134,54 @@ class BillDeskPaymentController extends Controller
             $payment->payment_date = now();
 
             $payment->save();
+
+            $enrollment->loadMissing('customer');
+            $fallbackEmail = trim((string) config('thirdparty.mykalyan.collection_fallback_email', ''));
+            $email = trim((string) ($enrollment->customer?->email ?? ''));
+            if ($email === '') {
+                $email = $fallbackEmail !== ''
+                    ? $fallbackEmail
+                    : 'customer-cid-'.$enrollment->customer_id.'@no-email.local';
+            }
+            $email = mb_substr($email, 0, 100);
+
+            $paymentDateStr = $billDesk->txnDate !== null
+                ? $billDesk->txnDate->format('d-m-Y H:i:s')
+                : $payment->payment_date->format('d-m-Y H:i:s');
+
+            $channel = (string) config('thirdparty.mykalyan.collection_payment_channel', 'BillDesk');
+
+            try {
+                $confirm = $this->collectionConfirm->confirmPayment([
+                    'Date' => $paymentDateStr,
+                    'enrNo' => (string) $enrollment->enrollment_id,
+                    'amount' => (string) ($billDesk->txnAmount ?? $payment->amount),
+                    'transId' => mb_substr((string) $payment->billdesk_reference, 0, 50),
+                    'email' => $email,
+                    'channel' => mb_substr($channel, 0, 50),
+                ]);
+
+                if (! empty($confirm['success']) && ! empty($confirm['receipt_id'])) {
+                    $payment->collection_receipt_id = $confirm['receipt_id'];
+                    $payment->save();
+                } elseif (! empty($confirm['duplicate'])) {
+                    Log::warning('Equals Collection confirmPayment: duplicate transId', [
+                        'billdesk_reference' => $payment->billdesk_reference,
+                        'enrollment_id' => $enrollment->enrollment_id,
+                    ]);
+                } else {
+                    Log::error('Equals Collection confirmPayment failed after BillDesk success', [
+                        'billdesk_reference' => $payment->billdesk_reference,
+                        'message' => $confirm['message'] ?? null,
+                        'raw' => $confirm['raw'] ?? null,
+                    ]);
+                }
+            } catch (\Throwable $e) {
+                Log::error('Equals Collection confirmPayment exception after BillDesk success', [
+                    'billdesk_reference' => $payment->billdesk_reference,
+                    'exception' => $e->getMessage(),
+                ]);
+            }
 
             $this->markCurrentMonthCollectionCompleted($enrollment, $payment, $billDesk);
 
@@ -309,6 +371,7 @@ class BillDeskPaymentController extends Controller
                 'bankReference' => $billDesk?->customerID ?? $payment->bank_reference_no,
                 'transactionStatus' => $billDesk?->txnStatus ?? ($payment->status === 'SUCCESS' ? 'Successful Transaction' : 'Cancel Transaction'),
                 'status' => $payment->status,
+                'collectionReceiptId' => $payment->collection_receipt_id,
             ],
         ], 200);
     }
@@ -371,7 +434,8 @@ class BillDeskPaymentController extends Controller
                 'statusLabel' => $payment->status,
                 'paymentDate' => $paymentDate,
                 'enrollmentNo' => $enrollment?->enrollment_id,
-                'receiptId' => $payment->bank_reference_no
+                'receiptId' => $payment->collection_receipt_id
+                    ?? $payment->bank_reference_no
                     ?? $billDesk?->txnReferenceNo
                     ?? $payment->billdesk_reference,
                 'paymentId' => $payment->id,

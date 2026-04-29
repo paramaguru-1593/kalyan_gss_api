@@ -2,15 +2,23 @@
 
 namespace App\Http\Controllers;
 
+use App\Exceptions\ThirdPartyApiException;
+use App\Services\CollectionConfirmPaymentService;
+use App\Services\ThirdPartyApiService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 
 class PaymentController extends Controller
 {
+    public function __construct(
+        private readonly ThirdPartyApiService $thirdPartyApi,
+        private readonly CollectionConfirmPaymentService $collectionConfirm,
+    ) {
+    }
+
     /**
      * Get Payment Information – whether payment can be accepted for this enrollment/month.
-     * GET /api/Enrollment_tbs/getPaymentInformation
-     * Query: EnrollmentID (required). Header: access_token (optional, no validation).
+     * Proxies to MyKalyan: GET .../thirdparty/api/Enrollment_tbs/getPaymentInformation?access_token=...&EnrollmentID=...
      */
     public function getPaymentInformation(Request $request): JsonResponse
     {
@@ -20,32 +28,44 @@ class PaymentController extends Controller
             'EnrollmentID.required' => 'EnrollmentID is required',
         ]);
 
-        $enrollmentId = $request->query('EnrollmentID');
-        $result = $this->fetchPaymentInformation($enrollmentId);
+        $enrollmentId = trim((string) $request->query('EnrollmentID'));
+        $path = (string) config(
+            'thirdparty.mykalyan.get_payment_information_path',
+            'thirdparty/api/Enrollment_tbs/getPaymentInformation'
+        );
+        $path = ltrim($path, '/');
 
-        if ($result === null) {
-            return response()->json([
-                'data' => [
-                    'paymentAccepted' => false,
-                    'paymentAcceptedMonth' => null,
-                    'acceptanceReason' => 'invalid_account',
-                ],
-                'error' => [
-                    'status' => 10000,
-                    'message' => 'No Data Found',
-                    'description' => 'Failed',
-                ],
+        try {
+            $response = $this->thirdPartyApi->getWithAccessTokenInQuery($path, [
+                'EnrollmentID' => $enrollmentId,
             ]);
-        }
 
-        return response()->json([
-            'data' => $result,
-            'error' => [
-                'status' => 200,
-                'message' => 'success',
+            return response()->json($response);
+        } catch (ThirdPartyApiException $e) {
+            $status = $e->getHttpStatus() ?: 502;
+            $body = $e->getResponseBody() ?? [];
+
+            if (isset($body['data'], $body['error'])) {
+                return response()->json($body, $status >= 400 ? $status : 200);
+            }
+
+            if (isset($body['message'], $body['status'])) {
+                $errorStatus = (int) $body['status'];
+
+                return response()->json($body, $errorStatus > 0 ? $errorStatus : $status);
+            }
+
+            $error = $body['error'] ?? [
+                'status' => $status,
+                'message' => $e->getMessage(),
                 'description' => '',
-            ],
-        ]);
+            ];
+
+            return response()->json([
+                'data' => $body['data'] ?? (object) [],
+                'error' => $error,
+            ], $status >= 400 ? $status : 200);
+        }
     }
 
     /**
@@ -64,61 +84,75 @@ class PaymentController extends Controller
             'channel' => 'required|string|max:50',
         ]);
 
-        $transId = $request->query('transId');
-        $result = $this->createCollection([
-            'Date' => $request->query('Date'),
-            'enrNo' => $request->query('enrNo'),
-            'amount' => $request->query('amount'),
-            'transId' => $transId,
-            'email' => $request->query('email'),
-            'channel' => $request->query('channel'),
-        ]);
+        $params = [
+            'Date' => (string) $request->query('Date'),
+            'enrNo' => (string) $request->query('enrNo'),
+            'amount' => (string) $request->query('amount'),
+            'transId' => (string) $request->query('transId'),
+            'email' => (string) $request->query('email'),
+            'channel' => (string) $request->query('channel'),
+        ];
 
-        if ($result === null) {
+        try {
+            $result = $this->collectionConfirm->confirmPayment($params);
+        } catch (ThirdPartyApiException $e) {
+            $status = $e->getHttpStatus() ?: 502;
+            $body = $e->getResponseBody() ?? [];
+
+            return response()->json([
+                'data' => $body['data'] ?? (object) [],
+                'error' => $body['error'] ?? [
+                    'status' => $status,
+                    'message' => $e->getMessage(),
+                    'description' => '',
+                ],
+            ], $status >= 400 && $status < 600 ? $status : 502);
+        } catch (\InvalidArgumentException $e) {
             return response()->json([
                 'data' => (object) [],
                 'error' => [
+                    'status' => 422,
+                    'message' => $e->getMessage(),
+                    'description' => '',
+                ],
+            ], 422);
+        }
+
+        if (($result['duplicate'] ?? false) === true) {
+            $raw = $result['raw'] ?? [];
+            $err = is_array($raw) ? ($raw['error'] ?? []) : [];
+
+            return response()->json([
+                'data' => is_array($raw['data'] ?? null) ? $raw['data'] : (object) [],
+                'error' => [
                     'status' => 400,
-                    'message' => 'TransactionID already exists in the Collection Table',
-                    'description' => 'OrderID already exists in the Collection Table',
+                    'message' => (string) ($err['message'] ?? 'TransactionID already exists in the Collection Table'),
+                    'description' => (string) ($err['description'] ?? 'OrderID already exists in the Collection Table'),
                 ],
             ], 400);
         }
 
-        return response()->json([
-            'data' => [['ReceiptID' => $result]],
-            'error' => [
-                'status' => 200,
-                'message' => 'Success',
-                'description' => '',
-            ],
-        ]);
-    }
-
-    /**
-     * Fetch whether payment is accepted for this enrollment. Return null for invalid account.
-     */
-    private function fetchPaymentInformation(string $enrollmentId): ?array
-    {
-        $enrollmentId = trim($enrollmentId);
-        if ($enrollmentId === '') {
-            return null;
+        if (($result['success'] ?? false) && ($result['receipt_id'] ?? '') !== '') {
+            return response()->json([
+                'data' => [['ReceiptID' => $result['receipt_id']]],
+                'error' => [
+                    'status' => 200,
+                    'message' => 'Success',
+                    'description' => '',
+                ],
+            ]);
         }
 
-        // TODO: Check max payment limit for current month (DB/external). Return null if invalid account.
-        return [
-            'paymentAccepted' => false,
-            'paymentAcceptedMonth' => 'February-2025',
-            'acceptanceReason' => 'success',
-        ];
-    }
+        $raw = $result['raw'] ?? [];
+        $err = is_array($raw) ? ($raw['error'] ?? []) : [];
 
-    /**
-     * Create collection record and return ReceiptID. Return null if transId already exists.
-     */
-    private function createCollection(array $input): ?int
-    {
-        // TODO: Check transId uniqueness in DB; insert collection; return new ReceiptID. Return null if duplicate.
-        return 16331715166203;
+        return response()->json([
+            'data' => isset($raw['data']) ? $raw['data'] : (object) [],
+            'error' => [
+                'status' => isset($err['status']) ? (int) $err['status'] : 400,
+                'message' => (string) ($err['message'] ?? ($result['message'] ?? 'Collection confirmation failed')),
+                'description' => (string) ($err['description'] ?? ''),
+            ],
+        ], 400);
     }
 }

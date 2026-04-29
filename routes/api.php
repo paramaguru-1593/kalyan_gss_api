@@ -25,45 +25,31 @@ Route::group(['middleware' => 'auth:customer-api'], function () {
         Route::post('/v1/otp/verify', [OtpController::class, 'verifyOtp']);
     });
 
+    // 
+    Route::post('/v2/storebasedscheme_data', [SchemesController::class, 'storeBasedSchemeData']);
+    Route::get('/v2/getSchemesByMobileNumber', [SchemesController::class, 'getSchemesByMobileNumber']);
+    Route::get('/v2/getAccountInformation', [SchemesController::class, 'getAccountInformation']);
+    Route::get('/v2/getCustomerLedgerReport', [SchemesController::class, 'getCustomerLedgerReport']);
+    Route::get('/v2/getPaymentInformation', [PaymentController::class, 'getPaymentInformation']);
+    Route::get('/v2/confirmPayment', [PaymentController::class, 'confirmPayment']);
+    // 
+    Route::post('/v2/customerkycinfo', [CustomerController::class, 'customerKycInfo']);
+    Route::post('/v2/customerkycupdation', [CustomerController::class, 'customerKycUpdation']);
+    Route::post('/v2/customerbankdetail_updation', [CustomerController::class, 'customerBankDetailUpdation']);
+    Route::post('/v2/enroll_new', [EnrollmentController::class, 'enrollNew']);
+    // 
+    Route::post('/v2/get-pincode-details', [GoldRateController::class, 'getPincodeDetails']);
+    Route::post('/v2/getstoregoldrate', [GoldRateController::class, 'getStoreGoldRate']);
+    Route::get('/v2/gettermsandcondition', [TermsController::class, 'getTermsAndCondition']);
+    Route::post('/v2/schemebenifits', [GoldRateController::class, 'schemeBenefits']);
+    Route::post('/v2/nomineedetails', [GoldRateController::class, 'nomineeDetails']);
+
     Route::post('/update-personal-details', [CustomerController::class, 'updatePersonalDetails']);
-    Route::post('/customerkycupdation', [CustomerController::class, 'customerKycUpdation']);
-    Route::post('/customerbankdetail_updation', [CustomerController::class, 'customerBankDetailUpdation']);
 
     Route::post('/profile-completeness', [CustomerController::class, 'profileCompleteness']);
-
-    // External APIs (no authentication required)
-    Route::get('/externals/getSchemesByMobileNumber', [SchemesController::class, 'getSchemesByMobileNumber']);
-
-    Route::get('/externals/gettermsandcondition', [TermsController::class, 'getTermsAndCondition']);
-
-    Route::post('/enroll_new', [EnrollmentController::class, 'enrollNew']);
-
-    Route::post('/customerkycinfo', [CustomerController::class, 'customerKycInfo']);
-
+    
     // Docman India: GetCustomerDetails (separate API)
     Route::post('/customer/GetCustomerDetails', [DocumanController::class, 'getCustomerDetails']);
-
-    // Enrollment / account information
-    Route::get('/Enrollment_tbs/getAccountInformation', [SchemesController::class, 'getAccountInformation']);
-    Route::get('/Enrollment_tbs/getPaymentInformation', [PaymentController::class, 'getPaymentInformation']);
-
-    // Collection creation (confirm payment)
-    Route::get('/Collection_tbs/confirmPayment', [PaymentController::class, 'confirmPayment']);
-
-    // Scheme list (store-based) and customer ledger
-    Route::post('/storebasedscheme_data', [SchemesController::class, 'storeBasedSchemeData']);
-    Route::get('/externals/getCustomerLedgerReport', [SchemesController::class, 'getCustomerLedgerReport']);
-
-    // Third-party KYC / bank updation APIs
-    // Route::post('/customerkycupdation', [KycController::class, 'customerKycUpdation']);
-    // Route::post('/customerbankdetail_updation', [KycController::class, 'customerBankDetailUpdation']);
-
-
-    // Gold rate, scheme benefits, nominee details,pincode
-    Route::post('/getstoregoldrate', [GoldRateController::class, 'getStoreGoldRate']);
-    Route::post('/externals/schemebenifits', [GoldRateController::class, 'schemeBenefits']);
-    Route::post('/externals/nomineedetails', [GoldRateController::class, 'nomineeDetails']);
-    Route::post('/externals/get-pincode-details', [GoldRateController::class, 'getPincodeDetails']);
 
     Route::post('/payment/request', [BillDeskPaymentController::class,'createPayment']);
     Route::post('/v1/payment/response-details', [BillDeskPaymentController::class,'paymentResponseDetails']);

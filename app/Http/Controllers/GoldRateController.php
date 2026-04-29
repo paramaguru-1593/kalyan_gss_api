@@ -41,16 +41,23 @@ class GoldRateController extends Controller
             $result = $this->fetchGoldRate($validated);
         } catch (ThirdPartyApiException $e) {
             $status = $e->getHttpStatus() ?: 502;
-            $body = $e->getResponseBody();
-            $error = $body['error'] ?? [
-                'status' => $status,
-                'message' => $e->getMessage(),
-                'description' => '',
+            $body = $e->getResponseBody() ?? [];
+
+            // Third-party error forwarding:
+            // - errorCode + errorResponse are forwarded from either body["error"] or top-level body.
+            $tpError = $body['error'] ?? null;
+            $tpStatus = is_array($tpError) ? ($tpError['status'] ?? null) : null;
+            $tpMessage = is_array($tpError) ? ($tpError['message'] ?? null) : null;
+            $tpDescription = is_array($tpError) ? ($tpError['description'] ?? null) : null;
+            $mappedError = [
+                'status' => (int) ($tpStatus ?? $body['status'] ?? $status),
+                'message' => (string) ($tpMessage ?? $body['message'] ?? $e->getMessage()),
+                'description' => (string) ($tpDescription ?? $body['description'] ?? ''),
             ];
 
             return response()->json([
                 'data' => (object) [],
-                'error' => $error,
+                'error' => $mappedError,
             ], $status >= 400 ? $status : 200);
         }
 
@@ -61,12 +68,37 @@ class GoldRateController extends Controller
             ], 400);
         }
 
-        return response()->json($result);
+        // Wrap third-party success payload into our API format.
+        // Also support third-party "business errors" returned with an "error" field.
+        if (isset($result['error']) && is_array($result['error'])) {
+            $tpError = $result['error'];
+            $errorStatus = (int) ($tpError['status'] ?? $result['status'] ?? 400);
+
+            $mappedError = [
+                'status' => $errorStatus,
+                'message' => (string) ($tpError['message'] ?? $result['message'] ?? 'Request failed'),
+                'description' => (string) ($tpError['description'] ?? ''),
+            ];
+
+            return response()->json([
+                'data' => $result['data'] ?? (object) [],
+                'error' => $mappedError,
+            ], $errorStatus >= 400 ? $errorStatus : 200);
+        }
+
+        return response()->json([
+            'data' => $result['data'] ?? $result,
+            'error' => [
+                'status' => 200,
+                'message' => 'Success',
+                'description' => '',
+            ],
+        ]);
     }
 
     /**
      * Scheme Benefits – summarized benefits and short terms for a scheme.
-     * POST /thirdparty/api/externals/schemebenifits
+     * POST /api/v2/schemebenifits
      */
     public function schemeBenefits(Request $request): JsonResponse
     {
@@ -81,31 +113,52 @@ class GoldRateController extends Controller
             ], 400);
         }
 
-        $schemeId = $request->input('scheme_id');
-        $content = $this->findSchemeBenefits($schemeId);
+        $path = (string) config(
+            'thirdparty.mykalyan.scheme_benefits_path',
+            'thirdparty/api/externals/schemebenifits'
+        );
+        $path = ltrim($path, '/');
 
-        if ($content === null) {
+        try {
+            $response = $this->thirdPartyApi->postWithAccessTokenInQuery($path, [], [
+                'scheme_id' => (int) $request->input('scheme_id'),
+            ]);
+
+            return response()->json($response);
+        } catch (ThirdPartyApiException $e) {
+            $status = $e->getHttpStatus() ?: 502;
+            $body = $e->getResponseBody() ?? [];
+
+            if (isset($body['message'], $body['status'])) {
+                $errorStatus = (int) $body['status'];
+
+                return response()->json($body, $errorStatus > 0 ? $errorStatus : $status);
+            }
+
+            $error = $body['error'] ?? [
+                'status' => $status,
+                'message' => $e->getMessage(),
+                'description' => '',
+            ];
+
             return response()->json([
-                'message' => 'Invalid Scheme ID',
-                'status' => 400,
-            ], 400);
+                'data' => (object) [],
+                'error' => $error,
+            ], $status >= 400 ? $status : 200);
         }
-
-        return response()->json([
-            'data' => ['content' => $content],
-            'status' => 200,
-        ]);
     }
 
     /**
-     * Nominee Details – nominee address and related details by customer_id.
-     * POST /thirdparty/api/externals/nomineedetails
+     * Nominee Details – nominee address and related details (MyKalyan externals).
+     * Proxies to: POST {base}/thirdparty/api/externals/nomineedetails?access_token=...
+     * JSON body: customer_id (required), scheme_id (optional when upstream expects it).
      */
     public function nomineeDetails(Request $request): JsonResponse
     {
         try {
             $request->validate([
                 'customer_id' => 'required|integer',
+                'scheme_id' => 'nullable|integer',
             ]);
         } catch (ValidationException $e) {
             return response()->json([
@@ -114,20 +167,42 @@ class GoldRateController extends Controller
             ], 400);
         }
 
-        $customerId = $request->input('customer_id');
-        $data = $this->findNomineeDetails($customerId);
+        $path = (string) config(
+            'thirdparty.mykalyan.nominee_details_path',
+            'thirdparty/api/externals/nomineedetails'
+        );
+        $path = ltrim($path, '/');
 
-        if ($data === null) {
-            return response()->json([
-                'message' => 'Customer ID',
-                'status' => 400,
-            ], 400);
+        $payload = ['customer_id' => (int) $request->input('customer_id')];
+        if ($request->filled('scheme_id')) {
+            $payload['scheme_id'] = (int) $request->input('scheme_id');
         }
 
-        return response()->json([
-            'data' => $data,
-            'status' => 200,
-        ]);
+        try {
+            $response = $this->thirdPartyApi->postWithAccessTokenInQuery($path, [], $payload);
+
+            return response()->json($response);
+        } catch (ThirdPartyApiException $e) {
+            $status = $e->getHttpStatus() ?: 502;
+            $body = $e->getResponseBody() ?? [];
+
+            if (isset($body['message'], $body['status'])) {
+                $errorStatus = (int) $body['status'];
+
+                return response()->json($body, $errorStatus > 0 ? $errorStatus : $status);
+            }
+
+            $error = $body['error'] ?? [
+                'status' => $status,
+                'message' => $e->getMessage(),
+                'description' => '',
+            ];
+
+            return response()->json([
+                'data' => (object) [],
+                'error' => $error,
+            ], $status >= 400 ? $status : 200);
+        }
     }
 
     /**
@@ -193,57 +268,6 @@ class GoldRateController extends Controller
                 'Transaction_ID' => $input['Transaction_ID'],
             ]
         );
-    }
-
-    /**
-     * Get scheme benefits content by scheme_id. Return null for invalid scheme.
-     */
-    private function findSchemeBenefits(int $schemeId): ?array
-    {
-        // TODO: Replace with DB or config lookup.
-        return [
-            '1.You can pay the monthly installments in any of the Kalyan Jewellers showrooms in India, My Kalyan Mini Stores and Online at payments.kalyanjewellers.net',
-            '2.You can pay the monthly installments in any of the Kalyan Jewellers showrooms in India, My Kalyan Mini Stores and Online at payments.kalyanjewellers.net ',
-        ];
-    }
-
-    /**
-     * Get nominee details by customer_id. Return null when not found.
-     */
-    private function findNomineeDetails(int $customerId): ?array
-    {
-        // TODO: Replace with DB lookup.
-        return [
-            'nominee_first_name' => 'Rajan',
-            'nominee_last_name' => 'R',
-            'nominee_mobile_no' => '9994795321',
-            'nominee_house_no' => '99',
-            'nominee_street' => '1st street',
-            'nominee_pincode' => '600106',
-            'nominee_state_id' => '11',
-            'nominee_city_id' => '11',
-            'nominee_post_office_id' => '11',
-            'nominee_state' => [
-                'id' => 31,
-                'name' => 'TAMIL NADU',
-            ],
-            'nominee_district' => [
-                'id' => 110,
-                'district_name' => 'CHENNAI',
-            ],
-            'nominee_postoffice' => [
-                [
-                    'id' => 113923,
-                    'postoffice_name' => 'ARUMBAKKAM S.O',
-                ],
-            ],
-            'nominee_city' => [
-                [
-                    'id' => 18832,
-                    'city_name' => 'EGMORE NUNGAMBAKKAM',
-                ],
-            ],
-        ];
     }
 
 }

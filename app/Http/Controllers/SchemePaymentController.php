@@ -51,6 +51,7 @@ class SchemePaymentController extends Controller
                 'amount' => (string) $payment->amount,
                 'amount_formatted' => '₹' . number_format((float) $payment->amount, 2),
                 'transaction_reference' => $payment->billdesk_reference,
+                'collection_receipt_id' => $payment->collection_receipt_id,
                 'transaction_status' => $this->mapTransactionStatus($payment->status),
                 'mode_of_payment' => 'Online',
                 'bank_reference_no' => $payment->bank_reference_no,

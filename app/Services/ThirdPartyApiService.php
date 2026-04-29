@@ -64,6 +64,40 @@ class ThirdPartyApiService
     }
 
     /**
+     * POST request with access_token in both query string and JSON body.
+     *
+     * Some third-party endpoints inconsistently read token from body even when docs mention query.
+     *
+     * @param  array<string, mixed>  $query
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     * @throws ThirdPartyApiException
+     */
+    public function postWithAccessTokenInQueryAndBody(string $path, array $query = [], array $data = []): array
+    {
+        $token = $this->authService->getValidToken();
+        $query['access_token'] = $token;
+        $data['access_token'] = $token;
+
+        return $this->request('post', $path, ['query' => $query, 'json' => $data], false)->json() ?? [];
+    }
+
+    /**
+     * POST request with access_token in JSON body only.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     * @throws ThirdPartyApiException
+     */
+    public function postWithAccessTokenInBody(string $path, array $data = []): array
+    {
+        $token = $this->authService->getValidToken();
+        $payload = array_merge(['access_token' => $token], $data);
+
+        return $this->request('post', $path, ['json' => $payload], false)->json() ?? [];
+    }
+
+    /**
      * POST request to the third-party API.
      *
      * @param  array<string, mixed>  $data

@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Services\CollectionConfirmPaymentService;
 use App\Services\DocumanApiService;
 use App\Services\DocumanTokenService;
 use App\Services\ThirdPartyApiService;
@@ -24,6 +25,12 @@ class AppServiceProvider extends ServiceProvider
 
         $this->app->singleton(ThirdPartyApiService::class, function ($app) {
             return new ThirdPartyApiService(
+                $app->make(ThirdPartyAuthService::class)
+            );
+        });
+
+        $this->app->singleton(CollectionConfirmPaymentService::class, function ($app) {
+            return new CollectionConfirmPaymentService(
                 $app->make(ThirdPartyAuthService::class)
             );
         });

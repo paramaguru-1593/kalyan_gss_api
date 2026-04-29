@@ -2,12 +2,24 @@
 
 namespace App\Http\Controllers;
 
+use App\Exceptions\ThirdPartyApiException;
 use App\Models\Customer;
+use App\Services\ThirdPartyApiService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 class CustomerController extends Controller
 {
+    private const THIRDPARTY_CUSTOMER_KYC_INFO_PATH = 'thirdparty/api/customerkycinfo';
+    private const THIRDPARTY_CUSTOMER_KYC_UPDATION_PATH = 'thirdparty/api/customerkycupdation';
+    private const THIRDPARTY_CUSTOMER_BANK_UPDATION_PATH = 'thirdparty/api/customerbankdetail_updation';
+
+    public function __construct(
+        private readonly ThirdPartyApiService $thirdPartyApi,
+    ) {
+    }
+
     /**
      * Update personal details by mobile number.
      * Single API: validate → apply → response (3 steps in one endpoint).
@@ -108,26 +120,54 @@ class CustomerController extends Controller
             'id_proof_number' => 'required|string|max:50',
         ]);
 
-        $customer = Customer::where('mobile_no', $validated['mobile_no'])->first();
+        $payload = [
+            'mobile_no' => $validated['mobile_no'],
+            'id_proof_type' => (int) $validated['id_proof_type'],
+            'id_proof_front_side' => $validated['id_proof_front_side'],
+            'id_proof_back_side' => $validated['id_proof_back_side'] ?? null,
+            'id_proof_number' => $validated['id_proof_number'],
+        ];
 
-        if (! $customer) {
+        try {
+            $response = $this->thirdPartyApi->postWithAccessTokenInQuery(
+                self::THIRDPARTY_CUSTOMER_KYC_UPDATION_PATH,
+                [],
+                $payload
+            );
+        } catch (ThirdPartyApiException $e) {
+            $status = $e->getHttpStatus() ?: 502;
+            $body = $e->getResponseBody() ?? [];
+
+            if (isset($body['message'], $body['status'])) {
+                $errorStatus = (int) $body['status'];
+                return response()->json($body, $errorStatus > 0 ? $errorStatus : $status);
+            }
+
             return response()->json([
-                'message' => 'Customer not found for the given mobile number.',
-                'status' => 404,
-            ], 404);
+                'message' => $e->getMessage(),
+                'status' => $status,
+            ], $status >= 400 ? $status : 502);
         }
 
-        $customer->id_proof_type = (int) $validated['id_proof_type'];
-        $customer->id_proof_number = $validated['id_proof_number'];
-        $customer->id_proof_front_side_url = $validated['id_proof_front_side'];
-        $customer->id_proof_back_side_url = $validated['id_proof_back_side'] ?? null;
-        $customer->id_proof_status = 'Verified';
-        $customer->save();
+        if (! $this->isThirdPartySuccessResponse($response)) {
+            return response()->json([
+                'message' => (string) ($response['message'] ?? 'KYC Details Not Updated!!'),
+                'status' => (int) ($response['status'] ?? 400),
+            ], (int) ($response['status'] ?? 400));
+        }
 
-        return response()->json([
-            'message' => 'KYC Updated Successfull !!',
-            'status' => 200,
-        ]);
+        Customer::updateOrCreate(
+            ['mobile_no' => $validated['mobile_no']],
+            [
+                'id_proof_type' => (int) $validated['id_proof_type'],
+                'id_proof_number' => $validated['id_proof_number'],
+                'id_proof_front_side_url' => $validated['id_proof_front_side'],
+                'id_proof_back_side_url' => $validated['id_proof_back_side'] ?? null,
+                'id_proof_status' => 'Verified',
+            ]
+        );
+
+        return response()->json($response);
     }
 
     /**
@@ -146,27 +186,62 @@ class CustomerController extends Controller
             'name_match_percentage' => 'required|max:100',
         ]);
 
-        $customer = Customer::where('mobile_no', $validated['mobile_no'])->first();
+        $payload = [
+            'mobile_no' => $validated['mobile_no'],
+            'bank_account_no' => $validated['bank_account_no'],
+            'account_holder_name' => $validated['account_holder_name'],
+            'ifsc_code' => $validated['ifsc_code'],
+            'file' => $validated['file'],
+            'account_holder_name_bank' => $validated['account_holder_name_bank'],
+            'name_match_percentage' => $validated['name_match_percentage'],
+        ];
 
-        if (! $customer) {
+        try {
+            $response = $this->thirdPartyApi->postWithAccessTokenInQuery(
+                self::THIRDPARTY_CUSTOMER_BANK_UPDATION_PATH,
+                [],
+                $payload
+            );
+        } catch (ThirdPartyApiException $e) {
+            $status = $e->getHttpStatus() ?: 502;
+            $body = $e->getResponseBody() ?? [];
+
+            if (isset($body['message'], $body['status'])) {
+                $errorStatus = (int) $body['status'];
+                return response()->json($body, $errorStatus > 0 ? $errorStatus : $status);
+            }
+
             return response()->json([
-                'message' => 'Customer not found for the given mobile number.',
-                'status' => 404,
-            ], 404);
+                'message' => $e->getMessage(),
+                'status' => $status,
+            ], $status >= 400 ? $status : 502);
         }
 
-        $customer->bank_account_no = $validated['bank_account_no'];
-        $customer->account_holder_name = $validated['account_holder_name'];
-        $customer->account_holder_name_bank = $validated['account_holder_name_bank'];
-        $customer->ifsc_code = $validated['ifsc_code'];
-        $customer->bank_book_url = $validated['file'];
-        $customer->name_match_percentage = $validated['name_match_percentage'];
-        $customer->save();
+        if (! $this->isThirdPartySuccessResponse($response)) {
+            return response()->json([
+                'message' => (string) ($response['message'] ?? 'Invalid Bank Details'),
+                'status' => (int) ($response['status'] ?? 400),
+            ], (int) ($response['status'] ?? 400));
+        }
 
-        return response()->json([
-            'message' => 'Bank Details Updated Successfull !!',
-            'status' => 200,
-        ]);
+        $nameMatchPercentage = null;
+        if (is_numeric($validated['name_match_percentage'])) {
+            $nameMatchPercentage = (float) $validated['name_match_percentage'];
+        }
+
+        Customer::updateOrCreate(
+            ['mobile_no' => $validated['mobile_no']],
+            [
+                'bank_account_no' => $validated['bank_account_no'],
+                'account_holder_name' => $validated['account_holder_name'],
+                'account_holder_name_bank' => $validated['account_holder_name_bank'],
+                'ifsc_code' => $validated['ifsc_code'],
+                'bank_book_url' => $validated['file'],
+                'name_match_percentage' => $nameMatchPercentage,
+            ]
+        );
+
+        return response()->json($response);
     }
 
     /**
@@ -209,67 +284,128 @@ class CustomerController extends Controller
             'mobile_no.required' => 'mobile_no is required',
         ]);
 
-        $customer = Customer::where('mobile_no', $request->input('mobile_no'))->first();
+        $mobileNo = trim((string) $request->input('mobile_no'));
 
-        if (! $customer) {
+        try {
+            $response = $this->thirdPartyApi->postWithAccessTokenInQuery(
+                self::THIRDPARTY_CUSTOMER_KYC_INFO_PATH,
+                [],
+                ['mobile_no' => $mobileNo]
+            );
+
+            try {
+                $this->syncCustomerKycFromThirdPartyResponse($response, $mobileNo);
+            } catch (\Throwable $e) {
+                // Do not fail the API response if third-party call succeeded but local sync failed.
+                Log::warning('Customer KYC sync failed after third-party success', [
+                    'mobile_no' => $mobileNo,
+                    'message' => $e->getMessage(),
+                ]);
+            }
+
+            return response()->json($response);
+        } catch (ThirdPartyApiException $e) {
+            $status = $e->getHttpStatus() ?: 502;
+            $body = $e->getResponseBody() ?? [];
+
+            // Forward common third-party business errors as-is (e.g., Customer not found).
+            if (isset($body['message'], $body['status'])) {
+                $errorStatus = (int) $body['status'];
+                return response()->json($body, $errorStatus > 0 ? $errorStatus : $status);
+            }
+
+            $error = $body['error'] ?? [
+                'status' => $status,
+                'message' => $e->getMessage(),
+                'description' => '',
+            ];
+
             return response()->json([
-                'message' => 'Customer not found',
-                'status' => 400,
-            ], 400);
+                'data' => (object) [],
+                'error' => $error,
+            ], $status >= 400 ? $status : 200);
+        }
+    }
+
+    /**
+     * Sync third-party customer KYC response into local customers table.
+     *
+     * Accepts both response shapes:
+     * - customer_details contains kyc_details/bank_details
+     * - customer_details + top-level kyc_details/bank_details
+     */
+    private function syncCustomerKycFromThirdPartyResponse(array $response, string $requestedMobile): void
+    {
+        $customerDetails = $response['customer_details'] ?? null;
+        if (! is_array($customerDetails)) {
+            return;
         }
 
-        return response()->json([
-            'customer_details' => [
-                'customerId' => $customer->customerId ?? $customer->id,
-                'first_name' => $customer->first_name ?? '',
-                'last_name' => $customer->last_name ?? '',
-                'mobile_no' => $customer->mobile_no ?? '',
-                'emailId' => $customer->email ?? '',
-                'gender' => $customer->gender ? strtolower($customer->gender) : '',
-                'date_of_birth' => $customer->date_of_birth?->format('Y-m-d') ?? '',
-                'customer_code' => $customer->customer_code ?? '',
-                'nominee_details' => [
-                    'nominee_name' => $customer->nominee_name ?? '',
-                    'relation_of_nominee' => $customer->relation_of_nominee ?? '',
-                    'nominee_dob' => $customer->nominee_dob?->format('Y-m-d') ?? '',
-                    'nominee_mobile_number' => $customer->nominee_mobile_number ?? '',
-                    'nominee_address' => $customer->nominee_address ?? '',
-                ],
-                'address' => [
-                    'current_address' => [
-                        'current_house_no' => $customer->current_house_no ?? '',
-                        'current_street' => $customer->current_street ?? '',
-                        'current_city' => $customer->current_city ?? '',
-                        'current_state' => $customer->current_state ?? '',
-                        'current_pincode' => $this->pincodeToInt($customer->current_pincode),
-                    ],
-                    'permanent_address' => [
-                        'permanent_house_no' => $customer->permanent_house_no ?? '',
-                        'permanent_street' => $customer->permanent_street ?? '',
-                        'permanent_city' => $customer->permanent_city ?? '',
-                        'permanent_state' => $customer->permanent_state ?? '',
-                        'permanent_pincode' => $this->pincodeToInt($customer->permanent_pincode),
-                    ],
-                ],
-                'kyc_details' => [
-                    'mobile_no' => $customer->mobile_no ?? '',
-                    'id_proof_type' => $customer->id_proof_type,
-                    'id_proof_front_side' => $customer->id_proof_front_side_url,
-                    'id_proof_back_side' => $customer->id_proof_back_side_url,
-                    'id_proof_number' => $this->maskString($customer->id_proof_number, 5),
-                ],
-                'bank_details' => [
-                    'bank_account_no' => $this->maskString($customer->bank_account_no, 3),
-                    'account_holder_name' => $customer->account_holder_name ?? '',
-                    'account_holder_name_bank' => $customer->account_holder_name_bank ?? '',
-                    'ifsc_code' => $customer->ifsc_code ?? '',
-                    'name_match_percentage' => $customer->name_match_percentage !== null
-                        ? number_format((float) $customer->name_match_percentage, 2, '.', '')
-                        : '',
-                ],
-            ],
-            'profile_completeness' => $this->getProfileCompleteness($customer),
-        ]);
+        $kycDetails = $customerDetails['kyc_details'] ?? $response['kyc_details'] ?? [];
+        if (! is_array($kycDetails)) {
+            $kycDetails = [];
+        }
+
+        $bankDetails = $customerDetails['bank_details'] ?? $response['bank_details'] ?? [];
+        if (! is_array($bankDetails)) {
+            $bankDetails = [];
+        }
+
+        $address = $customerDetails['address'] ?? [];
+        if (! is_array($address)) {
+            $address = [];
+        }
+        $currentAddress = $address['current_address'] ?? [];
+        if (! is_array($currentAddress)) {
+            $currentAddress = [];
+        }
+        $permanentAddress = $address['permanent_address'] ?? [];
+        if (! is_array($permanentAddress)) {
+            $permanentAddress = [];
+        }
+
+        $mobileNo = trim((string) ($customerDetails['mobile_no'] ?? $kycDetails['mobile_no'] ?? $requestedMobile));
+        if ($mobileNo === '') {
+            return;
+        }
+
+        $nameMatchPercentage = null;
+        if (isset($bankDetails['name_match_percentage']) && is_numeric($bankDetails['name_match_percentage'])) {
+            $nameMatchPercentage = (float) $bankDetails['name_match_percentage'];
+        }
+
+        Customer::updateOrCreate(
+            ['mobile_no' => $mobileNo],
+            [
+                'customerId' => $this->normalizeNullableInt($customerDetails['customerId'] ?? null),
+                'customer_code' => $this->normalizeNullableString($customerDetails['customer_code'] ?? null),
+                'first_name' => $this->normalizeNullableString($customerDetails['first_name'] ?? null),
+                'last_name' => $this->normalizeNullableString($customerDetails['last_name'] ?? null),
+                'email' => $this->normalizeNullableString($customerDetails['emailId'] ?? null),
+                'gender' => $this->normalizeNullableString($customerDetails['gender'] ?? null),
+                'date_of_birth' => $this->normalizeNullableString($customerDetails['date_of_birth'] ?? null),
+                'current_house_no' => $this->normalizeNullableString($currentAddress['current_house_no'] ?? null),
+                'current_street' => $this->normalizeNullableString($currentAddress['current_street'] ?? null),
+                'current_city' => $this->normalizeNullableString($currentAddress['current_city'] ?? null),
+                'current_state' => $this->normalizeNullableString($currentAddress['current_state'] ?? null),
+                'current_pincode' => $this->normalizeNullableString($currentAddress['current_pincode'] ?? null),
+                'permanent_house_no' => $this->normalizeNullableString($permanentAddress['permanent_house_no'] ?? null),
+                'permanent_street' => $this->normalizeNullableString($permanentAddress['permanent_street'] ?? null),
+                'permanent_city' => $this->normalizeNullableString($permanentAddress['permanent_city'] ?? null),
+                'permanent_state' => $this->normalizeNullableString($permanentAddress['permanent_state'] ?? null),
+                'permanent_pincode' => $this->normalizeNullableString($permanentAddress['permanent_pincode'] ?? null),
+                'id_proof_type' => $this->normalizeNullableInt($kycDetails['id_proof_type'] ?? null),
+                'id_proof_number' => $this->normalizeNullableString($kycDetails['id_proof_number'] ?? null),
+                'id_proof_front_side_url' => $this->normalizeNullableString($kycDetails['id_proof_front_side'] ?? null),
+                'id_proof_back_side_url' => $this->normalizeNullableString($kycDetails['id_proof_back_side'] ?? null),
+                'id_proof_status' => $this->normalizeNullableString($kycDetails['id_proof_number'] ?? null) ? 'Verified' : 'Not Verified',
+                'bank_account_no' => $this->normalizeNullableString($bankDetails['bank_account_no'] ?? null),
+                'account_holder_name' => $this->normalizeNullableString($bankDetails['account_holder_name'] ?? null),
+                'account_holder_name_bank' => $this->normalizeNullableString($bankDetails['account_holder_name_bank'] ?? null),
+                'ifsc_code' => $this->normalizeNullableString($bankDetails['ifsc_code'] ?? null),
+                'name_match_percentage' => $nameMatchPercentage,
+            ]
+        );
     }
 
     private function maskString(?string $value, int $visibleLastChars): string
@@ -290,6 +426,34 @@ class CustomerController extends Controller
             return 0;
         }
         return (int) preg_replace('/\D/', '', $value) ?: 0;
+    }
+
+    private function normalizeNullableString(mixed $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        $value = trim((string) $value);
+        return $value === '' ? null : $value;
+    }
+
+    private function normalizeNullableInt(mixed $value): ?int
+    {
+        if ($value === null || $value === '' || ! is_numeric($value)) {
+            return null;
+        }
+
+        return (int) $value;
+    }
+
+    private function isThirdPartySuccessResponse(array $response): bool
+    {
+        if (isset($response['status']) && (int) $response['status'] !== 200) {
+            return false;
+        }
+
+        return true;
     }
 
     /**

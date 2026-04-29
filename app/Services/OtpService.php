@@ -91,7 +91,16 @@ class OtpService
                 ]);
                 $customer->refresh();
 
-                $sendResult = $this->sendSmsViaQikberry($mobile, $otp);
+                // $sendResult = $this->sendSmsViaQikberry($mobile, $otp);
+                $sendResult = [
+                    'message_id' => null,
+                    'sender' => config('otp.qikberry.sender'),
+                    'template_id' => config('otp.qikberry.template_id'),
+                    'charges' => 0,
+                    'request_payload' => null,
+                    'response_payload' => null,
+                    'status' => 'skipped',
+                ];
 
                 OtpSmsLog::create([
                     'customer_id' => $customer->id,
